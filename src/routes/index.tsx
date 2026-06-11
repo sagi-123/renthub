@@ -161,7 +161,7 @@ function Hero() {
           <div className="relative overflow-hidden rounded-[2rem] shadow-[0_40px_80px_-30px_rgba(11,125,121,0.5)]">
             <img src={heroImg} alt="Modern luxury apartment building" width={1200} height={1200} className="h-[520px] w-full object-cover" />
           </div>
-          <div className="glass-card animate-float absolute -left-4 bottom-10 rounded-2xl p-5 sm:-left-10">
+          <div className="glass-card animate-float absolute left-2 bottom-8 rounded-2xl p-4 sm:left-4 sm:p-5">
             <div className="flex items-center gap-3">
               <div className="teal-icon grid h-12 w-12 place-items-center rounded-2xl">
                 <Users className="h-6 w-6" />
@@ -173,7 +173,7 @@ function Hero() {
               </div>
             </div>
           </div>
-          <div className="glass-card animate-float absolute -right-2 top-8 rounded-2xl px-4 py-3 sm:-right-6" style={{ animationDelay: "1.5s" }}>
+          <div className="glass-card animate-float absolute right-2 top-6 rounded-2xl px-4 py-3 sm:right-4" style={{ animationDelay: "1.5s" }}>
             <div className="flex items-center gap-2">
               <div className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: "var(--gradient-primary)" }}>
                 <Shield className="h-4 w-4 text-white" />
