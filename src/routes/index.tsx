@@ -126,10 +126,10 @@ function Hero() {
           <div className="inline-flex items-center gap-2 rounded-full border bg-white px-4 py-1.5 text-xs font-semibold" style={{ color: "var(--teal-600)", borderColor: "#CFEDEC" }}>
             <Sparkles className="h-3.5 w-3.5" /> India's most loved rental platform
           </div>
-          <h1 className="mt-6 text-5xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-6xl lg:text-7xl">
+          <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-5xl xl:text-6xl">
             Manage Rentals
             <br />
-            <span style={{ background: "var(--gradient-primary)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            <span className="whitespace-nowrap" style={{ background: "var(--gradient-primary)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               The Smart Way
             </span>
           </h1>
@@ -161,7 +161,7 @@ function Hero() {
           <div className="relative overflow-hidden rounded-[2rem] shadow-[0_40px_80px_-30px_rgba(11,125,121,0.5)]">
             <img src={heroImg} alt="Modern luxury apartment building" width={1200} height={1200} className="h-[520px] w-full object-cover" />
           </div>
-          <div className="glass-card animate-float absolute -left-4 bottom-10 rounded-2xl p-5 sm:-left-10">
+          <div className="glass-card animate-float absolute left-2 bottom-8 rounded-2xl p-4 sm:left-4 sm:p-5">
             <div className="flex items-center gap-3">
               <div className="teal-icon grid h-12 w-12 place-items-center rounded-2xl">
                 <Users className="h-6 w-6" />
@@ -173,7 +173,7 @@ function Hero() {
               </div>
             </div>
           </div>
-          <div className="glass-card animate-float absolute -right-2 top-8 rounded-2xl px-4 py-3 sm:-right-6" style={{ animationDelay: "1.5s" }}>
+          <div className="glass-card animate-float absolute right-2 top-6 rounded-2xl px-4 py-3 sm:right-4" style={{ animationDelay: "1.5s" }}>
             <div className="flex items-center gap-2">
               <div className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: "var(--gradient-primary)" }}>
                 <Shield className="h-4 w-4 text-white" />
@@ -205,7 +205,7 @@ function Services() {
     <section id="services" className="py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-4">
         <SectionTitle kicker="Our Services" title="Everything you need to run rentals" sub="A complete toolkit built for modern landlords and property managers." />
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {services.map((s) => (
             <div key={s.title} className="card-soft p-8">
               <div className="teal-icon mb-6 grid h-14 w-14 place-items-center rounded-2xl">
