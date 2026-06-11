@@ -126,10 +126,10 @@ function Hero() {
           <div className="inline-flex items-center gap-2 rounded-full border bg-white px-4 py-1.5 text-xs font-semibold" style={{ color: "var(--teal-600)", borderColor: "#CFEDEC" }}>
             <Sparkles className="h-3.5 w-3.5" /> India's most loved rental platform
           </div>
-          <h1 className="mt-6 text-5xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-6xl lg:text-7xl">
+          <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-5xl xl:text-6xl">
             Manage Rentals
             <br />
-            <span style={{ background: "var(--gradient-primary)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            <span className="whitespace-nowrap" style={{ background: "var(--gradient-primary)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               The Smart Way
             </span>
           </h1>
