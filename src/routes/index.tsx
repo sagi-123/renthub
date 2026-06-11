@@ -205,7 +205,7 @@ function Services() {
     <section id="services" className="py-24 lg:py-32">
       <div className="mx-auto max-w-7xl px-4">
         <SectionTitle kicker="Our Services" title="Everything you need to run rentals" sub="A complete toolkit built for modern landlords and property managers." />
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {services.map((s) => (
             <div key={s.title} className="card-soft p-8">
               <div className="teal-icon mb-6 grid h-14 w-14 place-items-center rounded-2xl">
