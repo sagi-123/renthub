@@ -31,6 +31,7 @@
   --font-sans: "Inter", system-ui, sans-serif;
 }
 
+/* ─── Light Theme ─────────────────────────────────────────────── */
 :root {
   --radius: 1.25rem;
   --background: oklch(1 0 0);
@@ -58,13 +59,60 @@
   --gradient-primary: linear-gradient(135deg, #0F9D9A 0%, #0B7D79 100%);
   --gradient-soft: linear-gradient(180deg, #FFFFFF 0%, #F4FBFB 100%);
   --gradient-banner: linear-gradient(120deg, #0F9D9A 0%, #0B7D79 60%, #095e5b 100%);
+  --gradient-mesh: radial-gradient(at 20% 20%, hsla(180,75%,40%,0.12) 0px, transparent 50%),
+                   radial-gradient(at 80% 0%, hsla(189,80%,35%,0.08) 0px, transparent 50%),
+                   radial-gradient(at 0% 60%, hsla(175,70%,45%,0.1) 0px, transparent 50%),
+                   radial-gradient(at 90% 80%, hsla(185,65%,38%,0.08) 0px, transparent 50%);
 
   --shadow-soft: 0 10px 30px -12px rgba(15, 157, 154, 0.18);
   --shadow-card: 0 20px 50px -24px rgba(15, 23, 42, 0.12);
   --shadow-elegant: 0 30px 80px -30px rgba(15, 157, 154, 0.35);
   --shadow-glass: 0 8px 32px rgba(15, 23, 42, 0.08);
+
+  /* Notification dot */
+  --activity-bg: #fff;
+  --activity-border: rgba(15, 157, 154, 0.2);
 }
 
+/* ─── Dark Theme ──────────────────────────────────────────────── */
+.dark {
+  --background: oklch(0.10 0.02 257);
+  --foreground: oklch(0.97 0.01 200);
+  --card: oklch(0.14 0.025 257);
+  --card-foreground: oklch(0.95 0.01 200);
+  --primary: oklch(0.60 0.13 192);
+  --primary-foreground: oklch(1 0 0);
+  --primary-glow: oklch(0.68 0.12 188);
+  --secondary: oklch(0.50 0.12 192);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(0.17 0.02 257);
+  --muted-foreground: oklch(0.62 0.03 220);
+  --accent: oklch(0.17 0.02 195);
+  --accent-foreground: oklch(0.95 0.01 200);
+  --border: oklch(0.22 0.025 257);
+  --ring: oklch(0.60 0.13 192);
+
+  --teal-50: rgba(15, 157, 154, 0.1);
+  --teal-100: rgba(15, 157, 154, 0.18);
+  --teal-500: #2fcfcc;
+  --teal-600: #25b5b2;
+  --ink: #f0f9ff;
+
+  --gradient-soft: linear-gradient(180deg, oklch(0.10 0.02 257) 0%, oklch(0.12 0.025 230) 100%);
+  --gradient-mesh: radial-gradient(at 20% 20%, hsla(180,75%,40%,0.18) 0px, transparent 50%),
+                   radial-gradient(at 80% 0%, hsla(189,80%,35%,0.14) 0px, transparent 50%),
+                   radial-gradient(at 0% 60%, hsla(175,70%,45%,0.14) 0px, transparent 50%),
+                   radial-gradient(at 90% 80%, hsla(185,65%,38%,0.12) 0px, transparent 50%);
+
+  --shadow-card: 0 20px 50px -24px rgba(0, 0, 0, 0.4);
+  --shadow-elegant: 0 30px 80px -30px rgba(15, 157, 154, 0.4);
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.3);
+
+  --activity-bg: oklch(0.14 0.025 257);
+  --activity-border: rgba(47, 207, 204, 0.25);
+}
+
+/* ─── Base Layer ──────────────────────────────────────────────── */
 @layer base {
   * { border-color: var(--color-border); }
   html { scroll-behavior: smooth; }
@@ -73,17 +121,24 @@
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    transition: background 0.3s ease, color 0.3s ease;
   }
   h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.02em; }
 }
 
+/* ─── Utility: Glass Card ─────────────────────────────────────── */
 @utility glass-card {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow: var(--shadow-glass);
+  .dark & {
+    background: rgba(20, 30, 50, 0.65);
+    border: 1px solid rgba(47, 207, 204, 0.15);
+  }
 }
 
+/* ─── Utility: Buttons ────────────────────────────────────────── */
 @utility btn-primary {
   background: var(--gradient-primary);
   color: white;
@@ -98,22 +153,29 @@
   border: 1px solid var(--teal-100);
   transition: all .2s ease;
   &:hover { background: var(--teal-50); border-color: var(--teal-500); }
+  .dark & { background: oklch(0.17 0.02 257); color: var(--foreground); }
+  .dark &:hover { background: var(--teal-50); }
 }
 
+/* ─── Utility: Cards ──────────────────────────────────────────── */
 @utility card-soft {
   background: white;
   border-radius: 1.5rem;
   box-shadow: var(--shadow-card);
   transition: transform .3s ease, box-shadow .3s ease;
   &:hover { transform: translateY(-6px); box-shadow: var(--shadow-elegant); }
+  .dark & { background: var(--card); border: 1px solid var(--border); }
 }
 
+/* ─── Utility: Icon bg ────────────────────────────────────────── */
 @utility teal-icon {
   background: linear-gradient(135deg, #E3F5F4, #F4FBFB);
   color: var(--teal-600);
   border: 1px solid rgba(15, 157, 154, 0.15);
+  .dark & { background: rgba(15, 157, 154, 0.15); }
 }
 
+/* ─── Animations ──────────────────────────────────────────────── */
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10px); }
@@ -124,3 +186,94 @@
   to { stroke-dashoffset: -24; }
 }
 @utility animate-dash { animation: dash 1.6s linear infinite; }
+
+/* Scroll-reveal */
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@utility animate-reveal {
+  opacity: 0;
+  animation: reveal-up 0.7s cubic-bezier(.22,.86,.41,1) forwards;
+}
+
+/* Counter pulse */
+@keyframes count-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@utility animate-count { animation: count-pulse 2s ease-in-out infinite; }
+
+/* Ticker slide in */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(100%); }
+}
+
+/* Orbit dots */
+@keyframes orbit {
+  from { transform: rotate(0deg) translateX(120px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(120px) rotate(-360deg); }
+}
+@keyframes orbit2 {
+  from { transform: rotate(120deg) translateX(160px) rotate(-120deg); }
+  to   { transform: rotate(480deg) translateX(160px) rotate(-480deg); }
+}
+@keyframes orbit3 {
+  from { transform: rotate(240deg) translateX(200px) rotate(-240deg); }
+  to   { transform: rotate(600deg) translateX(200px) rotate(-600deg); }
+}
+
+/* Typewriter cursor blink */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@utility animate-blink { animation: blink 1s step-end infinite; }
+
+/* Particle float */
+@keyframes particle-drift {
+  0%   { transform: translateY(0) translateX(0) scale(1); opacity: 0.6; }
+  33%  { transform: translateY(-30px) translateX(15px) scale(1.1); opacity: 0.8; }
+  66%  { transform: translateY(-10px) translateX(-10px) scale(0.95); opacity: 0.5; }
+  100% { transform: translateY(0) translateX(0) scale(1); opacity: 0.6; }
+}
+
+/* Gradient mesh animation */
+@keyframes mesh-shift {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Sticky CTA slide up */
+@keyframes slide-up-cta {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+@utility animate-slide-up { animation: slide-up-cta 0.4s cubic-bezier(.22,.86,.41,1) forwards; }
+
+/* ─── Dark mode toggle button ─────────────────────────────────── */
+.dark-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--teal-100);
+  transition: background 0.3s;
+  cursor: pointer;
+  border: 1.5px solid var(--teal-500);
+}
+.dark-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--teal-500);
+  transition: transform 0.3s;
+}
+.dark .dark-toggle::after { transform: translateX(20px); }

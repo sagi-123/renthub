@@ -1,16 +1,92 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Building2, FileText, CreditCard, BellRing, BarChart3,
   Check, Star, Menu, X, ArrowRight, Shield, Users, Home,
   PenLine, Wallet, UserPlus, Twitter, Linkedin, Instagram, Facebook,
-  Sparkles, TrendingUp
+  Sparkles, TrendingUp, Sun, Moon, Play, ChevronLeft, ChevronRight,
+  HelpCircle, CheckCircle2, Zap
 } from "lucide-react";
 import heroImg from "@/assets/hero-apartment.jpg";
 import aboutImg from "@/assets/about-apartments.jpg";
 import t1 from "@/assets/testimonial-1.jpg";
 import t2 from "@/assets/testimonial-2.jpg";
 import t3 from "@/assets/testimonial-3.jpg";
+
+/* ── Hooks ───────────────────────────────────────────── */
+function useDarkMode() {
+  const [dark, setDark] = useState(() =>
+    typeof window !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+  const toggle = useCallback(() => {
+    const next = !dark;
+    document.documentElement.classList.toggle("dark", next);
+    setDark(next);
+  }, [dark]);
+  return { dark, toggle };
+}
+
+function useTypewriter(words: string[], speed = 80, pause = 2000) {
+  const [display, setDisplay] = useState("");
+  const [wIdx, setWIdx] = useState(0);
+  const [charIdx, setCharIdx] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  useEffect(() => {
+    const word = words[wIdx];
+    const delay = deleting ? speed / 2 : charIdx === word.length ? pause : speed;
+    const t = setTimeout(() => {
+      if (!deleting && charIdx < word.length) {
+        setDisplay(word.slice(0, charIdx + 1)); setCharIdx(c => c + 1);
+      } else if (!deleting && charIdx === word.length) {
+        setDeleting(true);
+      } else if (deleting && charIdx > 0) {
+        setDisplay(word.slice(0, charIdx - 1)); setCharIdx(c => c - 1);
+      } else {
+        setDeleting(false); setWIdx(i => (i + 1) % words.length);
+      }
+    }, delay);
+    return () => clearTimeout(t);
+  }, [charIdx, deleting, wIdx, words, speed, pause]);
+  return display;
+}
+
+function useScrollReveal() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { el.style.animation = "reveal-up 0.7s cubic-bezier(.22,.86,.41,1) forwards"; obs.disconnect(); } },
+      { threshold: 0.15 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return ref;
+}
+
+function useAnimatedCounter(target: number, suffix = "", duration = 1800) {
+  const [count, setCount] = useState(0);
+  const [started, setStarted] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setStarted(true); obs.disconnect(); } }, { threshold: 0.4 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!started) return;
+    let start = 0;
+    const step = Math.ceil(target / (duration / 16));
+    const t = setInterval(() => {
+      start += step;
+      if (start >= target) { setCount(target); clearInterval(t); }
+      else setCount(start);
+    }, 16);
+    return () => clearInterval(t);
+  }, [started, target, duration]);
+  return { count, suffix, ref };
+}
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -81,6 +157,7 @@ function Logo() {
 
 function Navbar() {
   const [open, setOpen] = useState(false);
+  const { dark, toggle } = useDarkMode();
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
       <div className="mx-auto mt-4 max-w-7xl px-4">
@@ -94,8 +171,13 @@ function Navbar() {
             ))}
           </ul>
           <div className="hidden items-center gap-3 lg:flex">
-            <button className="btn-secondary rounded-xl px-4 py-2 text-sm font-semibold">Login</button>
-            <button className="btn-primary rounded-xl px-5 py-2 text-sm font-semibold">Register</button>
+            <button onClick={toggle} aria-label="Toggle dark mode"
+              className="grid h-9 w-9 place-items-center rounded-xl ring-1 ring-teal-100 transition-colors hover:bg-teal-50"
+              style={{ color: "var(--teal-600)" }}>
+              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <Link to="/admin" className="btn-secondary rounded-xl px-4 py-2 text-sm font-semibold flex items-center justify-center">Landlord Portal</Link>
+            <Link to="/tenant" className="btn-primary rounded-xl px-4 py-2 text-sm font-semibold flex items-center justify-center">Tenant Portal</Link>
           </div>
           <button onClick={() => setOpen(!open)} className="lg:hidden" aria-label="Menu">
             {open ? <X /> : <Menu />}
@@ -107,8 +189,8 @@ function Navbar() {
               {nav.map((n) => <li key={n.label}><a href={n.href} onClick={() => setOpen(false)} className="block text-sm font-medium">{n.label}</a></li>)}
             </ul>
             <div className="mt-4 flex gap-2">
-              <button className="btn-secondary flex-1 rounded-xl px-4 py-2 text-sm font-semibold">Login</button>
-              <button className="btn-primary flex-1 rounded-xl px-4 py-2 text-sm font-semibold">Register</button>
+              <Link to="/admin" className="btn-secondary flex-1 rounded-xl px-4 py-2 text-sm font-semibold flex items-center justify-center">Landlord Portal</Link>
+              <Link to="/tenant" className="btn-primary flex-1 rounded-xl px-4 py-2 text-sm font-semibold flex items-center justify-center">Tenant Portal</Link>
             </div>
           </div>
         )}
@@ -117,30 +199,51 @@ function Navbar() {
   );
 }
 
+const HERO_WORDS = ["for Landlords", "for Property Managers", "for Investors", "The Smart Way"];
+const PARTICLES = [
+  { top: "15%", left: "8%", size: 10, delay: "0s", dur: "7s" },
+  { top: "70%", left: "5%", size: 6,  delay: "1s", dur: "9s" },
+  { top: "40%", left: "90%", size: 8, delay: "2s", dur: "8s" },
+  { top: "80%", left: "85%", size: 5, delay: "0.5s", dur: "6s" },
+  { top: "25%", left: "50%", size: 7, delay: "1.5s", dur: "10s" },
+];
+
 function Hero() {
+  const typed = useTypewriter(HERO_WORDS);
   return (
-    <section id="home" className="relative overflow-hidden pt-36 pb-20 lg:pt-44 lg:pb-28" style={{ background: "var(--gradient-soft)" }}>
-      <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full opacity-30 blur-3xl" style={{ background: "var(--teal-100)" }} />
-      <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 lg:grid-cols-2">
+    <section id="home" className="relative overflow-hidden pt-36 pb-20 lg:pt-44 lg:pb-28"
+      style={{ background: "var(--gradient-soft)" }}>
+      {/* Mesh gradient */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: "var(--gradient-mesh)", opacity: 0.9 }} />
+      {/* Floating particles */}
+      {PARTICLES.map((p, i) => (
+        <div key={i} className="pointer-events-none absolute rounded-full"
+          style={{ top: p.top, left: p.left, width: p.size, height: p.size,
+            background: "var(--teal-500)", opacity: 0.18,
+            animation: `particle-drift ${p.dur} ease-in-out ${p.delay} infinite` }} />
+      ))}
+      <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 lg:grid-cols-2 relative">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border bg-white px-4 py-1.5 text-xs font-semibold" style={{ color: "var(--teal-600)", borderColor: "#CFEDEC" }}>
+          <div className="inline-flex items-center gap-2 rounded-full border bg-white px-4 py-1.5 text-xs font-semibold"
+            style={{ color: "var(--teal-600)", borderColor: "#CFEDEC" }}>
             <Sparkles className="h-3.5 w-3.5" /> India's most loved rental platform
           </div>
           <h1 className="mt-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-foreground sm:text-5xl xl:text-6xl">
-            Manage Rentals
-            <br />
+            Manage Rentals<br />
             <span className="whitespace-nowrap" style={{ background: "var(--gradient-primary)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-              The Smart Way
+              {typed}<span className="animate-blink" style={{ WebkitTextFillColor: "var(--teal-500)" }}>|</span>
             </span>
           </h1>
           <p className="mt-6 max-w-xl text-lg text-muted-foreground">
             Digital Agreements, Online Payments, Tenant Management, Automated Reminders — Everything You Need In One Place.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <button className="btn-primary inline-flex items-center gap-2 rounded-2xl px-7 py-4 text-base font-semibold">
+            <Link to="/admin" className="btn-primary inline-flex items-center gap-2 rounded-2xl px-7 py-4 text-base font-semibold">
               Get Started <ArrowRight className="h-4 w-4" />
+            </Link>
+            <button className="btn-secondary inline-flex items-center gap-2 rounded-2xl px-7 py-4 text-base font-semibold">
+              <Play className="h-4 w-4" style={{ color: "var(--teal-600)" }} /> Watch Demo
             </button>
-            <button className="btn-secondary rounded-2xl px-7 py-4 text-base font-semibold">Explore Services</button>
           </div>
           <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3">
             {["Secure & Reliable", "Digital Agreements", "Online Payments"].map((b) => (
@@ -153,13 +256,14 @@ function Hero() {
             ))}
           </div>
         </div>
-
         <div className="relative">
           <div className="absolute inset-0 -z-10 flex items-center justify-center">
             <div className="aspect-square w-[110%] rounded-full" style={{ background: "radial-gradient(circle, #0F9D9A 0%, #0B7D79 70%)", opacity: 0.95 }} />
           </div>
           <div className="relative overflow-hidden rounded-[2rem] shadow-[0_40px_80px_-30px_rgba(11,125,121,0.5)]">
             <img src={heroImg} alt="Modern luxury apartment building" width={1200} height={1200} className="h-[520px] w-full object-cover" />
+            {/* Overlay gradient on image */}
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, transparent 60%, rgba(11,125,121,0.3) 100%)" }} />
           </div>
           <div className="glass-card animate-float absolute left-2 bottom-8 rounded-2xl p-4 sm:left-4 sm:p-5">
             <div className="flex items-center gap-3">
@@ -189,6 +293,7 @@ function Hero() {
     </section>
   );
 }
+
 
 function SectionTitle({ kicker, title, sub }: { kicker: string; title: string; sub?: string }) {
   return (
@@ -255,6 +360,60 @@ function HowItWorks() {
   );
 }
 
+const STAT_NUMS = [
+  { num: 500, suffix: "+", label: "Happy Clients", icon: Users },
+  { num: 1200, suffix: "+", label: "Properties Managed", icon: Building2 },
+  { num: 3000, suffix: "+", label: "Agreements Created", icon: FileText },
+  { num: 2, prefix: "₹", suffix: "Cr+", label: "Rent Collected", icon: TrendingUp },
+];
+
+function AnimatedStat({ num, suffix, prefix, label, icon: Icon }: { num: number; suffix?: string; prefix?: string; label: string; icon: React.FC<{className?: string}> }) {
+  const { count, ref } = useAnimatedCounter(num, suffix, 1800);
+  return (
+    <div ref={ref} className="text-center sm:text-left">
+      <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/15 backdrop-blur sm:mx-0">
+        <Icon className="h-6 w-6" />
+      </div>
+      <div className="mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">
+        {prefix}{count}{suffix}
+      </div>
+      <div className="mt-1 text-sm font-medium text-white/80">{label}</div>
+    </div>
+  );
+}
+
+const TICKER_ITEMS = [
+  { name: "Rahul S.", action: "signed a digital agreement", time: "2 mins ago" },
+  { name: "Priya M.", action: "collected rent online", time: "5 mins ago" },
+  { name: "Arjun K.", action: "added a new property", time: "8 mins ago" },
+  { name: "Sneha R.", action: "sent a payment reminder", time: "12 mins ago" },
+];
+
+function LiveTicker() {
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => { setIdx(i => (i + 1) % TICKER_ITEMS.length); setVisible(true); }, 400);
+    }, 4000);
+    return () => clearInterval(iv);
+  }, []);
+  const item = TICKER_ITEMS[idx];
+  return (
+    <div className="fixed bottom-20 right-4 z-40 sm:bottom-6" style={{ transition: "opacity 0.4s", opacity: visible ? 1 : 0 }}>
+      <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-lg"
+        style={{ border: "1px solid var(--activity-border)", background: "var(--activity-bg)", maxWidth: 280 }}>
+        <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "var(--teal-500)" }} />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full" style={{ background: "var(--teal-500)" }} />
+        </span>
+        <span className="text-muted-foreground"><b className="text-foreground">{item.name}</b> {item.action} · <span style={{ color: "var(--teal-600)" }}>{item.time}</span></span>
+      </div>
+    </div>
+  );
+}
+
 function Stats() {
   return (
     <section className="py-16 lg:py-24">
@@ -263,15 +422,7 @@ function Stats() {
           <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
           <div className="pointer-events-none absolute -left-16 bottom-0 h-60 w-60 rounded-full bg-white/10 blur-3xl" />
           <div className="relative grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
-            {stats.map((s) => (
-              <div key={s.label} className="text-center sm:text-left">
-                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-white/15 backdrop-blur sm:mx-0">
-                  <s.icon className="h-6 w-6" />
-                </div>
-                <div className="mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">{s.value}</div>
-                <div className="mt-1 text-sm font-medium text-white/80">{s.label}</div>
-              </div>
-            ))}
+            {STAT_NUMS.map((s) => <AnimatedStat key={s.label} {...s} />)}
           </div>
         </div>
       </div>
@@ -313,9 +464,9 @@ function About() {
               </li>
             ))}
           </ul>
-          <button className="btn-primary mt-8 inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 font-semibold">
+          <Link to="/admin" className="btn-primary mt-8 inline-flex items-center gap-2 rounded-2xl px-6 py-3.5 font-semibold">
             Start Free Trial <ArrowRight className="h-4 w-4" />
-          </button>
+          </Link>
         </div>
       </div>
     </section>
@@ -323,25 +474,115 @@ function About() {
 }
 
 function Testimonials() {
+  const [idx, setIdx] = useState(0);
+  const prev = () => setIdx(i => (i - 1 + testimonials.length) % testimonials.length);
+  const next = () => setIdx(i => (i + 1) % testimonials.length);
+  const t = testimonials[idx];
   return (
     <section className="py-24 lg:py-32" style={{ background: "var(--gradient-soft)" }}>
       <div className="mx-auto max-w-7xl px-4">
         <SectionTitle kicker="Testimonials" title="Loved by property owners across India" />
-        <div className="grid gap-6 lg:grid-cols-3">
-          {testimonials.map((t) => (
-            <figure key={t.name} className="card-soft p-8">
-              <div className="flex gap-1" style={{ color: "var(--teal-500)" }}>
-                {Array.from({ length: 5 }).map((_, i) => <Star key={i} className="h-4 w-4" fill="currentColor" />)}
+        {/* Carousel */}
+        <div className="mx-auto max-w-2xl">
+          <figure className="card-soft p-8 text-center" key={t.name}>
+            <div className="flex justify-center gap-1" style={{ color: "var(--teal-500)" }}>
+              {Array.from({ length: 5 }).map((_, i) => <Star key={i} className="h-5 w-5" fill="currentColor" />)}
+            </div>
+            <blockquote className="mt-5 text-lg leading-relaxed text-foreground">"{t.quote}"</blockquote>
+            <figcaption className="mt-6 flex items-center justify-center gap-3">
+              <img src={t.img} alt={t.name} loading="lazy" width={56} height={56} className="h-14 w-14 rounded-full object-cover ring-2 ring-teal-100" />
+              <div className="text-left">
+                <div className="font-bold">{t.name}</div>
+                <div className="text-xs text-muted-foreground">{t.role}</div>
               </div>
-              <blockquote className="mt-5 text-base leading-relaxed text-foreground">"{t.quote}"</blockquote>
-              <figcaption className="mt-6 flex items-center gap-3">
-                <img src={t.img} alt={t.name} loading="lazy" width={48} height={48} className="h-12 w-12 rounded-full object-cover ring-2 ring-teal-100" />
-                <div>
-                  <div className="font-bold">{t.name}</div>
-                  <div className="text-xs text-muted-foreground">{t.role}</div>
-                </div>
-              </figcaption>
-            </figure>
+            </figcaption>
+          </figure>
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <button onClick={prev} className="grid h-10 w-10 place-items-center rounded-xl ring-1 ring-teal-100 transition-colors hover:bg-teal-50" style={{ color: "var(--teal-600)" }}>
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <div className="flex gap-2">
+              {testimonials.map((_, i) => (
+                <button key={i} onClick={() => setIdx(i)} className="h-2.5 w-2.5 rounded-full transition-all"
+                  style={{ background: i === idx ? "var(--teal-500)" : "var(--teal-100)", width: i === idx ? 24 : 10 }} />
+              ))}
+            </div>
+            <button onClick={next} className="grid h-10 w-10 place-items-center rounded-xl ring-1 ring-teal-100 transition-colors hover:bg-teal-50" style={{ color: "var(--teal-600)" }}>
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const PLANS = [
+  { name: "Starter", price: "Free", desc: "Perfect to get started", features: ["Up to 3 properties", "Digital agreements", "Email reminders", "Basic reports"], cta: "Get Started", highlight: false },
+  { name: "Pro", price: "₹999", period: "/mo", desc: "For serious landlords", features: ["Unlimited properties", "Online rent collection", "WhatsApp reminders", "Advanced analytics", "Priority support"], cta: "Start Free Trial", highlight: true },
+  { name: "Enterprise", price: "Custom", desc: "For large portfolios", features: ["Everything in Pro", "Dedicated manager", "Custom integrations", "SLA guarantee", "Team access"], cta: "Contact Sales", highlight: false },
+];
+
+function Pricing() {
+  const ref = useScrollReveal();
+  return (
+    <section id="pricing" className="py-24 lg:py-32">
+      <div className="mx-auto max-w-7xl px-4">
+        <SectionTitle kicker="Pricing" title="Simple, transparent pricing" sub="No hidden fees. Cancel anytime." />
+        <div ref={ref} className="grid gap-6 lg:grid-cols-3" style={{ opacity: 0 }}>
+          {PLANS.map((p) => (
+            <div key={p.name} className={`card-soft flex flex-col p-8 ${p.highlight ? "ring-2 ring-teal-500" : ""}`}
+              style={p.highlight ? { background: "linear-gradient(180deg,#f4fbfb,#fff)" } : {}}>
+              {p.highlight && <div className="mb-4 self-start rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: "var(--gradient-primary)" }}>Most Popular</div>}
+              <div className="text-sm font-bold uppercase tracking-wider" style={{ color: "var(--teal-600)" }}>{p.name}</div>
+              <div className="mt-3 flex items-end gap-1">
+                <span className="text-4xl font-extrabold">{p.price}</span>
+                {p.period && <span className="mb-1 text-muted-foreground">{p.period}</span>}
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">{p.desc}</p>
+              <ul className="mt-6 flex-1 space-y-3">
+                {p.features.map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm">
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" style={{ color: "var(--teal-500)" }} />{f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/admin" className={`mt-8 w-full rounded-2xl py-3 font-semibold flex items-center justify-center ${p.highlight ? "btn-primary" : "btn-secondary"}`}>{p.cta}</Link>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const FAQ_ITEMS = [
+  { q: "Is RentHub free to use?", a: "Yes! Our Starter plan is free forever with up to 3 properties. Upgrade anytime for more features." },
+  { q: "Are digital agreements legally valid in India?", a: "Absolutely. RentHub agreements comply with the IT Act 2000 and are legally enforceable across India." },
+  { q: "How does online rent collection work?", a: "Tenants pay via UPI, cards, or netbanking. Funds are automatically reconciled and deposited into your account." },
+  { q: "Can I manage multiple properties?", a: "Yes. Pro and Enterprise plans support unlimited properties with a single dashboard." },
+  { q: "Is my data secure?", a: "We use bank-grade AES-256 encryption and are hosted on ISO 27001 certified infrastructure." },
+];
+
+function FAQ() {
+  const [open, setOpen] = useState<number | null>(null);
+  const ref = useScrollReveal();
+  return (
+    <section className="py-24 lg:py-32" style={{ background: "var(--gradient-soft)" }}>
+      <div className="mx-auto max-w-3xl px-4">
+        <SectionTitle kicker="FAQ" title="Frequently asked questions" />
+        <div ref={ref} className="space-y-3" style={{ opacity: 0 }}>
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={i} className="card-soft overflow-hidden">
+              <button className="flex w-full items-center justify-between px-6 py-5 text-left font-semibold"
+                onClick={() => setOpen(open === i ? null : i)}>
+                <span>{item.q}</span>
+                <HelpCircle className="h-5 w-5 flex-shrink-0" style={{ color: "var(--teal-500)", transform: open === i ? "rotate(180deg)" : "none", transition: "transform 0.3s" }} />
+              </button>
+              {open === i && (
+                <div className="px-6 pb-5 text-sm leading-relaxed text-muted-foreground">{item.a}</div>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -350,20 +591,38 @@ function Testimonials() {
 }
 
 function CTA() {
+  const [showCta, setShowCta] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setShowCta(true), 3000); return () => clearTimeout(t); }, []);
   return (
-    <section className="py-20">
-      <div className="mx-auto max-w-5xl px-4">
-        <div className="relative overflow-hidden rounded-[2rem] bg-white p-10 text-center ring-1 ring-teal-100 sm:p-16" style={{ boxShadow: "var(--shadow-card)" }}>
-          <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full opacity-40 blur-3xl" style={{ background: "var(--teal-100)" }} />
-          <h2 className="relative text-3xl font-extrabold tracking-tight sm:text-4xl">Ready to simplify your rentals?</h2>
-          <p className="relative mx-auto mt-3 max-w-xl text-muted-foreground">Join 500+ property owners managing rentals the smart way.</p>
-          <div className="relative mt-7 flex flex-wrap justify-center gap-3">
-            <button className="btn-primary inline-flex items-center gap-2 rounded-2xl px-7 py-4 font-semibold">Get Started Free <ArrowRight className="h-4 w-4" /></button>
-            <button className="btn-secondary rounded-2xl px-7 py-4 font-semibold">Talk to Sales</button>
+    <>
+      <section className="py-20">
+        <div className="mx-auto max-w-5xl px-4">
+          <div className="relative overflow-hidden rounded-[2rem] bg-white p-10 text-center ring-1 ring-teal-100 sm:p-16" style={{ boxShadow: "var(--shadow-card)" }}>
+            <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full opacity-40 blur-3xl" style={{ background: "var(--teal-100)" }} />
+            <div className="relative mb-3 flex justify-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: "var(--gradient-primary)" }}>
+                <Zap className="h-3 w-3" /> 14-day free trial
+              </span>
+            </div>
+            <h2 className="relative text-3xl font-extrabold tracking-tight sm:text-4xl">Ready to simplify your rentals?</h2>
+            <p className="relative mx-auto mt-3 max-w-xl text-muted-foreground">Join 500+ property owners managing rentals the smart way.</p>
+            <div className="relative mt-7 flex flex-wrap justify-center gap-3">
+              <Link to="/admin" className="btn-primary inline-flex items-center gap-2 rounded-2xl px-7 py-4 font-semibold flex items-center justify-center">Get Started Free <ArrowRight className="h-4 w-4" /></Link>
+              <button className="btn-secondary rounded-2xl px-7 py-4 font-semibold">Talk to Sales</button>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+      {/* Sticky mobile CTA */}
+      {showCta && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 sm:hidden animate-slide-up">
+          <div className="flex items-center justify-between gap-3 border-t px-4 py-3" style={{ background: "var(--background)", borderColor: "var(--teal-100)" }}>
+            <span className="text-sm font-medium">Start managing smarter 🏠</span>
+            <Link to="/admin" className="btn-primary flex-shrink-0 rounded-xl px-5 py-2 text-sm font-semibold flex items-center justify-center">Get Started</Link>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -387,6 +646,8 @@ function Footer() {
             <h4 className="text-sm font-bold">Quick Links</h4>
             <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
               {nav.map((n) => <li key={n.label}><a href={n.href} className="hover:text-foreground">{n.label}</a></li>)}
+              <li><Link to="/admin" className="hover:text-foreground">Landlord Portal</Link></li>
+              <li><Link to="/tenant" className="hover:text-foreground">Tenant Portal</Link></li>
             </ul>
           </div>
           <div>
@@ -427,8 +688,11 @@ function Landing() {
       <Stats />
       <About />
       <Testimonials />
+      <Pricing />
+      <FAQ />
       <CTA />
       <Footer />
+      <LiveTicker />
     </main>
   );
 }
