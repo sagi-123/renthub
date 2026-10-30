@@ -1784,20 +1784,63 @@ TENANT: ______________________`;
     }
   };
 
+  // Unified list of all selectable tenants (from tenant registry + any agreement signers)
+  const allSelectableTenants = React.useMemo(() => {
+    const list: Array<{
+      id: string;
+      name: string;
+      unit: string;
+      rentAmount: number;
+      paymentStatus: "Paid" | "Unpaid" | "Overdue";
+      phone: string;
+      email: string;
+      dueDate?: string;
+    }> = [...tenants];
+
+    // Also include any tenant from agreements who is not yet in the rh_tenants list
+    agreements.forEach(agr => {
+      const exists = list.some(
+        t => t.id === agr.id ||
+          (t.email && agr.tenantEmail && t.email.toLowerCase().trim() === agr.tenantEmail.toLowerCase().trim()) ||
+          (t.name.toLowerCase().trim() === agr.tenantName.toLowerCase().trim() && t.unit.toLowerCase().trim() === agr.unit.toLowerCase().trim())
+      );
+      if (!exists && agr.tenantName) {
+        list.push({
+          id: agr.id,
+          name: agr.tenantName,
+          unit: agr.unit || "N/A",
+          rentAmount: agr.rentAmount || 0,
+          paymentStatus: "Unpaid",
+          phone: agr.tenantPhone || "",
+          email: agr.tenantEmail || "",
+          dueDate: "5th of each month"
+        });
+      }
+    });
+
+    return list;
+  }, [tenants, agreements]);
+
   // Sync reminder recipient details
   useEffect(() => {
-    const selected = tenants.find(t => t.id === remindTenantId);
+    const selected = allSelectableTenants.find(t => t.id === remindTenantId);
     if (selected) {
-      setRemindMsg(`Dear ${selected.name}, this is a friendly reminder that rent of ₹${selected.rentAmount.toLocaleString()} for ${selected.unit} is ${selected.paymentStatus === "Overdue" ? "OVERDUE" : "due"}. Please complete the payment online at your earliest convenience. - RentHub`);
+      if (selected.paymentStatus === "Overdue") {
+        setRemindMsg(`Dear ${selected.name}, this is an urgent reminder that rent of ₹${selected.rentAmount.toLocaleString()} for ${selected.unit} is OVERDUE. Please complete the payment online at your earliest convenience. - RentHub`);
+      } else if (selected.paymentStatus === "Paid") {
+        setRemindMsg(`Dear ${selected.name}, this is a reminder regarding the upcoming rent cycle for ${selected.unit} (₹${selected.rentAmount.toLocaleString()}). Rent is due on ${selected.dueDate || '5th of each month'}. Thank you! - RentHub`);
+      } else {
+        setRemindMsg(`Dear ${selected.name}, this is a friendly reminder that rent of ₹${selected.rentAmount.toLocaleString()} for ${selected.unit} is due. Please complete the payment online at your earliest convenience. - RentHub`);
+      }
     } else {
       setRemindMsg("");
     }
-  }, [remindTenantId, tenants]);
+  }, [remindTenantId, allSelectableTenants]);
 
   // Send Reminder action
   const handleSendReminder = (e: React.FormEvent) => {
     e.preventDefault();
-    const selected = tenants.find(t => t.id === remindTenantId);
+    const selected = allSelectableTenants.find(t => t.id === remindTenantId);
     if (!selected || !remindMsg) {
       showToast("Please select a tenant and enter a reminder message", "error");
       return;
@@ -1825,6 +1868,11 @@ TENANT: ______________________`;
       // Open communication channels based on selected type
       if (remindChannel === "WhatsApp") {
         let cleanPhone = (selected.phone || "").replace(/\D/g, "");
+        if (!cleanPhone) {
+          showToast(`Cannot redirect: No phone number recorded for ${selected.name}`, "error");
+          setIsSendingReminder(false);
+          return;
+        }
         if (cleanPhone.length === 10) {
           cleanPhone = "91" + cleanPhone; // default Indian code if no country code provided
         }
@@ -1832,6 +1880,11 @@ TENANT: ______________________`;
         window.open(whatsappUrl, "_blank");
         showToast(`Reminder logged. Redirecting to WhatsApp for ${selected.name}...`);
       } else if (remindChannel === "Email") {
+        if (!selected.email) {
+          showToast(`Cannot open Gmail: No email address recorded for ${selected.name}`, "error");
+          setIsSendingReminder(false);
+          return;
+        }
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(selected.email || "")}&su=${encodeURIComponent("Rent Payment Reminder - RentHub")}&body=${encodeURIComponent(remindMsg)}`;
         window.open(gmailUrl, "_blank");
         showToast(`Reminder logged. Opening Gmail Web Compose for ${selected.name}...`);
@@ -4691,6 +4744,9 @@ TENANT: ______________________`;
 
   // 5. Reminders Tab
   function renderReminders() {
+    const pendingTargets = allSelectableTenants.filter(t => t.paymentStatus !== "Paid");
+    const clearedTargets = allSelectableTenants.filter(t => t.paymentStatus === "Paid");
+
     return (
       <div className="space-y-6 animate-reveal">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -4701,7 +4757,18 @@ TENANT: ______________________`;
 
             <form onSubmit={handleSendReminder} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-muted-foreground">Select Unpaid Target *</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-muted-foreground">Select Recipient Tenant *</label>
+                  {allSelectableTenants.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { setActiveTab("tenants"); handleAddTenantClick(); }}
+                      className="text-[11px] font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1"
+                    >
+                      <Plus className="h-3 w-3" /> Add Tenant
+                    </button>
+                  )}
+                </div>
                 <select
                   required
                   value={remindTenantId}
@@ -4709,10 +4776,33 @@ TENANT: ______________________`;
                   className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent dark:bg-card focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">-- Select Tenant --</option>
-                  {tenants.filter(t => t.paymentStatus !== "Paid").map(t => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.unit}) - Dues: ₹{t.rentAmount.toLocaleString()}</option>
-                  ))}
+                  {pendingTargets.length > 0 && (
+                    <optgroup label="⚠️ Pending / Overdue Rent">
+                      {pendingTargets.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.unit}) — {t.paymentStatus.toUpperCase()} (₹{t.rentAmount.toLocaleString()})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {clearedTargets.length > 0 && (
+                    <optgroup label="✅ Paid / Upcoming Cycle">
+                      {clearedTargets.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.unit}) — Paid (₹{t.rentAmount.toLocaleString()})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {allSelectableTenants.length === 0 && (
+                    <option disabled value="">No tenants found in account</option>
+                  )}
                 </select>
+                {allSelectableTenants.length === 0 && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                    No registered tenants found. Please add a tenant or draft an agreement first.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
