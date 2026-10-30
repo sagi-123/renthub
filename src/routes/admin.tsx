@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { syncCollection, saveCollection, deleteRecord, saveRecord, supabase } from "../lib/supabase";
 import { createLandlordRouteAccount } from "../lib/api/razorpay";
+import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPortal,
@@ -367,9 +368,6 @@ function AdminPortal() {
       const filter = `landlordId=eq.${encodeURIComponent(landlordId)}`;
       const localKey = (key: string) => `${key}_${landlordId}`;
 
-      const syncedTenants = await syncCollection<Tenant>("rh_tenants", localKey("rh_tenants"), INITIAL_TENANTS, filter);
-      setTenants(syncedTenants);
-
       const syncedAgreements = await syncCollection<Agreement>("rh_agreements", localKey("rh_agreements"), INITIAL_AGREEMENTS, filter);
       setAgreements(syncedAgreements);
 
@@ -381,6 +379,15 @@ function AdminPortal() {
 
       const syncedPayments = await syncCollection<PaymentRecord>("rh_payments", localKey("rh_payments"), INITIAL_PAYMENTS, filter);
       setPayments(syncedPayments);
+
+      const syncedTenants = await syncCollection<Tenant>("rh_tenants", localKey("rh_tenants"), INITIAL_TENANTS, filter);
+      // Automatic Monthly Rent Cycle Evaluation:
+      // Computes Paid / Unpaid / Overdue based on current calendar month and payment logs
+      const { updatedTenants, hasChanges } = syncTenantsWithMonthlyCycle(syncedTenants, syncedPayments);
+      if (hasChanges) {
+        saveCollection("rh_tenants", localKey("rh_tenants"), updatedTenants);
+      }
+      setTenants(updatedTenants);
 
       const syncedRenewals = await syncCollection<any>("rh_renewals", localKey("rh_renewals"), [], filter);
       setRenewals(syncedRenewals);
@@ -1805,21 +1812,27 @@ TENANT: ______________________`;
           (t.name.toLowerCase().trim() === agr.tenantName.toLowerCase().trim() && t.unit.toLowerCase().trim() === agr.unit.toLowerCase().trim())
       );
       if (!exists && agr.tenantName) {
-        list.push({
+        const dummyTenant = {
           id: agr.id,
           name: agr.tenantName,
           unit: agr.unit || "N/A",
           rentAmount: agr.rentAmount || 0,
-          paymentStatus: "Unpaid",
+          paymentStatus: "Unpaid" as const,
           phone: agr.tenantPhone || "",
           email: agr.tenantEmail || "",
           dueDate: "5th of each month"
+        };
+        const evaluated = evaluateTenantCycleStatus(dummyTenant, payments);
+        list.push({
+          ...dummyTenant,
+          paymentStatus: evaluated.paymentStatus,
+          dueDate: evaluated.dueDate
         });
       }
     });
 
     return list;
-  }, [tenants, agreements]);
+  }, [tenants, agreements, payments]);
 
   // Sync reminder recipient details
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
 import { syncCollection, saveCollection, saveRecord, supabase } from "../lib/supabase";
 import { createRazorpayOrder } from "../lib/api/razorpay";
 import { sendOtpEmail } from "../lib/api/email";
+import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
 
 export const Route = createFileRoute("/tenant")({
   component: TenantPortal,
@@ -524,6 +525,24 @@ function TenantPortal() {
       }
       setPayments(syncedPayments);
 
+      // ── Automatic Monthly Rent Cycle Evaluation ───────────────────────
+      const { updatedTenants, hasChanges } = syncTenantsWithMonthlyCycle(syncedTenants, syncedPayments);
+      if (hasChanges) {
+        saveCollection("rh_tenants", `rh_tenants${tenantIdSuffix}`, updatedTenants);
+        if (landlordId) {
+          const landlordTenantsStr = localStorage.getItem(`rh_tenants_${landlordId}`);
+          if (landlordTenantsStr) {
+            const landlordTenants = JSON.parse(landlordTenantsStr) as Tenant[];
+            const updatedLandlordTenants = landlordTenants.map(lt => {
+              const match = updatedTenants.find(ut => ut.id === lt.id || (ut.email && lt.email && ut.email.toLowerCase().trim() === lt.email.toLowerCase().trim()));
+              return match ? { ...lt, paymentStatus: match.paymentStatus, dueDate: match.dueDate } : lt;
+            });
+            saveCollection("rh_tenants", `rh_tenants_${landlordId}`, updatedLandlordTenants);
+          }
+        }
+      }
+      setTenants(updatedTenants);
+
       // ── Renewals ──────────────────────────────────────────────────────
       let syncedRenewals = await syncCollection<RenewalRequest>(
         "rh_renewals", `rh_renewals${tenantIdSuffix}`, [], tenantFilter
@@ -537,7 +556,15 @@ function TenantPortal() {
       }
       setRenewals(syncedRenewals);
 
-      setCurrentTenant(parsedTenant);
+      const activeMatch = updatedTenants.find(t => t.id === parsedTenant.id || (t.email && parsedTenant.email && t.email.toLowerCase().trim() === parsedTenant.email.toLowerCase().trim())) || parsedTenant;
+      const evaluatedActive = evaluateTenantCycleStatus(activeMatch, syncedPayments);
+      const activeWithCycle = {
+        ...activeMatch,
+        paymentStatus: evaluatedActive.paymentStatus,
+        dueDate: evaluatedActive.dueDate
+      };
+      setCurrentTenant(activeWithCycle);
+      sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(activeWithCycle));
 
       if (parsedTenant && parsedTenant.landlordId) {
         setLandlordInfo(null); // Clear stale info before fetching new
@@ -868,12 +895,10 @@ function TenantPortal() {
     setIsCreatingRazorpayOrder(true);
     try {
       const res = await createRazorpayOrder({
-        data: {
-          amount: currentTenant.rentAmount,
-          receiptId: "rcpt_" + Math.random().toString(36).substring(4),
-          landlordAccountId: landlordInfo?.razorpay_account_id,
-          unitName: currentTenant.unit
-        }
+        amount: currentTenant.rentAmount,
+        receiptId: "rcpt_" + Math.random().toString(36).substring(4),
+        landlordAccountId: landlordInfo?.razorpay_account_id,
+        unitName: currentTenant.unit
       });
 
       if (res.success && res.orderId) {
@@ -932,12 +957,6 @@ function TenantPortal() {
         if (prev >= 100) {
           clearInterval(interval);
           setTimeout(() => {
-            // Update Tenant Status to Paid
-            const updatedTenants = tenants.map(t =>
-              t.id === currentTenant.id ? { ...t, paymentStatus: "Paid" as const } : t
-            );
-            saveTenants(updatedTenants);
-
             // Record Payment
             const newPayment: PaymentRecord = {
               id: "p-" + Math.random().toString(36).substring(4),
@@ -951,7 +970,22 @@ function TenantPortal() {
               status: "Success",
               transactionId: txnId
             };
-            savePayments([newPayment, ...payments]);
+            const updatedPayments = [newPayment, ...payments];
+            savePayments(updatedPayments);
+
+            // Update Tenant Status & roll over to next month's due date
+            const evaluated = evaluateTenantCycleStatus(currentTenant, updatedPayments);
+            const updatedTenants = tenants.map(t =>
+              t.id === currentTenant.id ? { ...t, paymentStatus: evaluated.paymentStatus, dueDate: evaluated.dueDate } : t
+            );
+            saveTenants(updatedTenants);
+            const updatedCurrent = {
+              ...currentTenant,
+              paymentStatus: evaluated.paymentStatus,
+              dueDate: evaluated.dueDate
+            };
+            setCurrentTenant(updatedCurrent);
+            sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(updatedCurrent));
 
             setPaymentSuccess(true);
             setPayProgress(-1);
@@ -1947,13 +1981,11 @@ function TenantPortal() {
 
                             try {
                               const emailResult = await sendOtpEmail({
-                                data: {
-                                  toEmail: currentTenant.email,
-                                  tenantName: currentTenant.name,
-                                  otp: generatedOtp,
-                                  rentAmount: currentTenant.rentAmount,
-                                  unit: currentTenant.unit
-                                }
+                                toEmail: currentTenant.email,
+                                tenantName: currentTenant.name,
+                                otp: generatedOtp,
+                                rentAmount: currentTenant.rentAmount,
+                                unit: currentTenant.unit
                               });
 
                               if (emailResult.devMode && emailResult.otp) {
