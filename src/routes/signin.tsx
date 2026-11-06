@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Home, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles, Shield, Users } from "lucide-react";
 import { syncCollection, supabase } from "../lib/supabase";
 import { sendAuthOtpEmail } from "../lib/api/email";
+import { logActivity } from "../lib/activity";
 
 export const Route = createFileRoute("/signin")({
   component: SignInPage,
@@ -110,7 +111,13 @@ function SignInPage() {
           setSuccess("Signed in successfully!");
           sessionStorage.setItem("rh_admin_logged_in", "true");
           sessionStorage.setItem("rh_logged_in_landlord", JSON.stringify(landlord));
-          
+          logActivity({
+            type: "landlord_signin",
+            title: "Landlord Signed In",
+            details: `Landlord ${landlord.name || "Owner"} signed into portal (${landlord.email})`,
+            actorEmail: landlord.email,
+            actorName: landlord.name,
+          });
           navigate({ to: "/admin" });
         } else {
           setError("Invalid email or password. Please verify credentials or reset password.");
@@ -145,7 +152,14 @@ function SignInPage() {
           }
           setSuccess(`Welcome back, ${tenant.name}!`);
           sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(tenant));
-          
+          logActivity({
+            type: "tenant_signin",
+            title: "Tenant Signed In",
+            details: `Tenant ${tenant.name} (${tenant.unit || "Unit"}) signed into portal (${tenant.email})`,
+            actorEmail: tenant.email,
+            actorName: tenant.name,
+            unit: tenant.unit,
+          });
           navigate({ to: "/tenant" });
         } else {
           setError("Tenant email not found. Please contact your Landlord.");

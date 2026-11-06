@@ -11,6 +11,7 @@ import { syncCollection, saveCollection, saveRecord, supabase } from "../lib/sup
 import { createRazorpayOrder } from "../lib/api/razorpay";
 import { sendOtpEmail, sendAuthOtpEmail } from "../lib/api/email";
 import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
+import { logActivity } from "../lib/activity";
 
 export const Route = createFileRoute("/tenant")({
   component: TenantPortal,
@@ -841,6 +842,14 @@ function TenantPortal() {
       setLoginError("");
       setLoginEmail("");
       setLoginPassword("");
+      logActivity({
+        type: "tenant_signin",
+        title: "Tenant Signed In",
+        details: `Tenant ${localTenant.name} (Unit ${localTenant.unit}) accessed their portal`,
+        actorEmail: localTenant.email,
+        actorName: localTenant.name,
+        unit: localTenant.unit,
+      });
       showToast(`Welcome back, ${localTenant.name}!`);
     } else {
       setLoginError("Tenant email not found. Please contact your Landlord to register your email or sign up below.");
@@ -965,6 +974,15 @@ function TenantPortal() {
       setTenantConfirmPassword("");
       setShowOtp(false);
       setTempTenantData(null);
+      logActivity({
+        type: "tenant_signup",
+        title: "New Tenant Registered",
+        details: `Tenant ${newTenant.name} joined Unit ${newTenant.unit} under Landlord ${landlord.name || landlord.email} (₹${(newTenant.rentAmount || 0).toLocaleString("en-IN")}/mo)`,
+        actorEmail: newTenant.email,
+        actorName: newTenant.name,
+        unit: newTenant.unit,
+        amount: newTenant.rentAmount,
+      });
       showToast("Email verified successfully!");
     } catch (err) {
       console.error(err);
@@ -1340,6 +1358,15 @@ function TenantPortal() {
 
             setPaymentSuccess(true);
             setPayProgress(-1);
+            logActivity({
+              type: "payment_received",
+              title: "Rent Payment Received",
+              details: `₹${currentTenant.rentAmount.toLocaleString("en-IN")} rent collected from ${currentTenant.name} (Unit ${currentTenant.unit}) via ${payMethod} — Txn: ${txnId}`,
+              actorEmail: currentTenant.email,
+              actorName: currentTenant.name,
+              unit: currentTenant.unit,
+              amount: currentTenant.rentAmount,
+            });
             showToast(`Rent of ₹${currentTenant.rentAmount.toLocaleString()} paid successfully!`);
           }, 300);
           return 100;

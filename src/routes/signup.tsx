@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Home, Lock, Mail, User, Phone, ArrowRight, Eye, EyeOff, Sparkles, Shield } from "lucide-react";
 import { saveRecord, syncCollection, supabase } from "../lib/supabase";
 import { sendAuthOtpEmail } from "../lib/api/email";
+import { logActivity } from "../lib/activity";
 
 export const Route = createFileRoute("/signup")({
   component: SignUpPage,
@@ -158,6 +159,14 @@ function SignUpPage() {
     sessionStorage.setItem("rh_admin_logged_in", "true");
     sessionStorage.setItem("rh_logged_in_landlord", JSON.stringify(tempLandlordData));
     
+    logActivity({
+      type: "landlord_signup",
+      title: "New Landlord Registration",
+      details: `Landlord ${tempLandlordData?.name || "Owner"} registered (${tempLandlordData?.email})`,
+      actorEmail: tempLandlordData?.email,
+      actorName: tempLandlordData?.name,
+    });
+
     setSuccess("Email verified successfully!");
     navigate({ to: "/admin" });
   };

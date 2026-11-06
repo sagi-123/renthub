@@ -16,6 +16,7 @@ import { syncCollection, saveCollection, deleteRecord, saveRecord, supabase } fr
 import { createLandlordRouteAccount } from "../lib/api/razorpay";
 import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
 import { sendAuthOtpEmail } from "../lib/api/email";
+import { logActivity } from "../lib/activity";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPortal,
@@ -509,6 +510,13 @@ function AdminPortal() {
         setAdminError("");
         setAdminEmail("");
         setAdminPassword("");
+        logActivity({
+          type: "landlord_signin",
+          title: "Landlord Signed In",
+          details: `Landlord ${landlord.name || "Owner"} accessed the management portal (${landlord.email})`,
+          actorEmail: landlord.email,
+          actorName: landlord.name,
+        });
         showToast(`Welcome back, ${landlord.name || "Owner"}!`);
       } else {
         setAdminError("Invalid credentials. Please verify your email and password.");
@@ -553,6 +561,13 @@ function AdminPortal() {
       setAdminPassword("");
       setAdminName("");
       setAdminPhone("");
+      logActivity({
+        type: "landlord_signup",
+        title: "New Landlord Registered",
+        details: `Landlord ${newLandlord.name} created account (${newLandlord.email})`,
+        actorEmail: newLandlord.email,
+        actorName: newLandlord.name,
+      });
       showToast("Account created successfully!");
     } catch (err) {
       console.error(err);
@@ -2699,6 +2714,15 @@ TENANT: ______________________`;
               <LogOut className="h-4 w-4" />
               <span>Log Out</span>
             </button>
+
+            <Link
+              to="/super-admin"
+              className="p-2 rounded-xl ring-1 ring-teal-100 hover:bg-teal-50 text-teal-600 dark:ring-teal-900/40 dark:hover:bg-teal-950/20 flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors"
+              title="Super Admin Control Center"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span className="hidden sm:inline">Super Admin</span>
+            </Link>
           </div>
         </div>
       </aside>
