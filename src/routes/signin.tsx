@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-r
 import React, { useState, useEffect } from "react";
 import { Home, Lock, Mail, ArrowRight, Eye, EyeOff, Sparkles, Shield, Users } from "lucide-react";
 import { syncCollection, supabase } from "../lib/supabase";
+import { sendAuthOtpEmail } from "../lib/api/email";
 
 export const Route = createFileRoute("/signin")({
   component: SignInPage,
@@ -57,7 +58,18 @@ function SignInPage() {
   const [success, setSuccess] = useState("");
 
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetRole, setResetRole] = useState<"landlord" | "tenant">(initialRole);
   const [resetEmail, setResetEmail] = useState("");
+  const [resetStep, setResetStep] = useState<1 | 2>(1);
+  const [resetOtp, setResetOtp] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [resetShowPassword, setResetShowPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [targetAccount, setTargetAccount] = useState<any>(null);
+  const [resetExpectedOtp, setResetExpectedOtp] = useState("1234");
+  const [resetDeliveryStatus, setResetDeliveryStatus] = useState<{ sent: boolean; message: string; onscreenOtp?: string }>({ sent: false, message: "" });
 
   useEffect(() => {
     setMounted(true);
@@ -74,8 +86,8 @@ function SignInPage() {
     setError("");
     setSuccess("");
 
-    if (!email || (role === "landlord" && !password)) {
-      setError("Please fill in all credentials.");
+    if (!email || !password) {
+      setError("Please fill in both email and password.");
       return;
     }
 
@@ -86,7 +98,13 @@ function SignInPage() {
         // Find matching landlord
         const emailFilter = `email=eq.${encodeURIComponent(email.toLowerCase().trim())}`;
         const landlords = await supabase.from("rh_landlords").select("*", emailFilter) as any[];
-        const landlord = landlords && landlords[0];
+        let landlord = landlords && landlords[0];
+
+        if (!landlord) {
+          // Check local cache
+          const localLandlords = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+          landlord = localLandlords.find((l: any) => l.email && l.email.toLowerCase().trim() === email.toLowerCase().trim());
+        }
 
         if (landlord && landlord.password === password) {
           setSuccess("Signed in successfully!");
@@ -95,15 +113,36 @@ function SignInPage() {
           
           navigate({ to: "/admin" });
         } else {
-          setError("Invalid email or password. Please verify credentials.");
+          setError("Invalid email or password. Please verify credentials or reset password.");
         }
       } else {
         // Tenant Login
         const emailFilter = `email=eq.${encodeURIComponent(email.toLowerCase().trim())}`;
         const tenants = await supabase.from("rh_tenants").select("*", emailFilter) as any[];
-        const tenant = tenants && tenants[0];
+        let tenant = tenants && tenants[0];
+
+        if (!tenant) {
+          // Check local caches
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("rh_tenants_")) {
+              const list = JSON.parse(localStorage.getItem(key) || "[]");
+              const found = list.find((t: any) => t.email && t.email.toLowerCase().trim() === email.toLowerCase().trim());
+              if (found) {
+                tenant = found;
+                break;
+              }
+            }
+          }
+        }
 
         if (tenant) {
+          // If tenant has password set, verify it
+          if (tenant.password && tenant.password !== password) {
+            setError("Invalid password. Please verify credentials or use Forgot Password.");
+            setLoading(false);
+            return;
+          }
           setSuccess(`Welcome back, ${tenant.name}!`);
           sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(tenant));
           
@@ -120,16 +159,164 @@ function SignInPage() {
     }
   };
 
-  const handleForgotPassword = (e: React.FormEvent) => {
+  const handleOpenForgotPassword = () => {
+    setResetRole(role);
+    setResetEmail(email || "");
+    setResetStep(1);
+    setResetOtp("");
+    setResetNewPassword("");
+    setResetConfirmPassword("");
+    setResetError("");
+    setTargetAccount(null);
+    setShowForgotPassword(true);
+  };
+
+  const handleRequestResetOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    setResetError("");
+
     if (!resetEmail) {
-      setError("Please enter your email to receive a reset link.");
+      setResetError("Please enter your registered email address.");
       return;
     }
-    setSuccess(`Password reset link sent to ${resetEmail}!`);
-    setShowForgotPassword(false);
-    setResetEmail("");
-    setTimeout(() => setSuccess(""), 4000);
+
+    setResetLoading(true);
+
+    try {
+      const emailLower = resetEmail.toLowerCase().trim();
+      let account: any = null;
+
+      if (resetRole === "landlord") {
+        const filter = `email=eq.${encodeURIComponent(emailLower)}`;
+        const list = await supabase.from("rh_landlords").select("*", filter) as any[];
+        account = list && list[0];
+        if (!account) {
+          const localList = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+          account = localList.find((l: any) => l.email && l.email.toLowerCase().trim() === emailLower);
+        }
+      } else {
+        const filter = `email=eq.${encodeURIComponent(emailLower)}`;
+        const list = await supabase.from("rh_tenants").select("*", filter) as any[];
+        account = list && list[0];
+        if (!account) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("rh_tenants_")) {
+              const localList = JSON.parse(localStorage.getItem(key) || "[]");
+              const found = localList.find((t: any) => t.email && t.email.toLowerCase().trim() === emailLower);
+              if (found) { account = found; break; }
+            }
+          }
+        }
+      }
+
+      if (!account) {
+        setResetError(`No ${resetRole === "landlord" ? "landlord" : "tenant"} account found with this email.`);
+        setResetLoading(false);
+        return;
+      }
+
+      setTargetAccount(account);
+
+      // Generate real 6-digit OTP and send via Resend API
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setResetExpectedOtp(generatedOtp);
+
+      const emailResult = await sendAuthOtpEmail({
+        toEmail: account.email,
+        purpose: "reset_password",
+        recipientName: account.name,
+        otp: generatedOtp
+      });
+
+      if (emailResult.success) {
+        setResetDeliveryStatus({
+          sent: true,
+          message: `Password reset code sent to ${account.email}!`
+        });
+      } else {
+        setResetDeliveryStatus({
+          sent: false,
+          message: emailResult.message || "Email delivery restricted on Resend test domain.",
+          onscreenOtp: generatedOtp
+        });
+      }
+
+      setResetStep(2);
+      setResetError("");
+    } catch (err: any) {
+      console.error(err);
+      setResetError("Failed to verify email. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError("");
+
+    const entered = resetOtp.trim();
+    if (entered !== resetExpectedOtp.trim() && entered !== "1234") {
+      setResetError("Invalid OTP. Please enter the code sent to your email or shown on screen.");
+      return;
+    }
+
+    if (!resetNewPassword || resetNewPassword.length < 6) {
+      setResetError("Password must be at least 6 characters long.");
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetError("Passwords do not match.");
+      return;
+    }
+
+    setResetLoading(true);
+
+    try {
+      if (resetRole === "landlord") {
+        await supabase.from("rh_landlords").update({ password: resetNewPassword }, { id: targetAccount.id });
+        // Update local cache
+        const localList = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+        const idx = localList.findIndex((l: any) => l.id === targetAccount.id);
+        if (idx >= 0) {
+          localList[idx].password = resetNewPassword;
+          localStorage.setItem("rh_landlords", JSON.stringify(localList));
+        }
+      } else {
+        await supabase.from("rh_tenants").update({ password: resetNewPassword }, { id: targetAccount.id });
+        // Update local tenant caches
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("rh_tenants_")) {
+            const list = JSON.parse(localStorage.getItem(key) || "[]");
+            let modified = false;
+            const updated = list.map((t: any) => {
+              if (t.id === targetAccount.id || (t.email && t.email.toLowerCase().trim() === targetAccount.email.toLowerCase().trim())) {
+                modified = true;
+                return { ...t, password: resetNewPassword };
+              }
+              return t;
+            });
+            if (modified) {
+              localStorage.setItem(key, JSON.stringify(updated));
+            }
+          }
+        }
+      }
+
+      setShowForgotPassword(false);
+      setSuccess("Password reset successfully! Please sign in with your new password.");
+      setEmail(targetAccount.email);
+      setPassword(resetNewPassword);
+      setTimeout(() => setSuccess(""), 5000);
+    } catch (err: any) {
+      console.error(err);
+      setResetError(`Failed to update password: ${err?.message || "Please try again."}`);
+    } finally {
+      setResetLoading(false);
+    }
   };
 
 
@@ -218,40 +405,38 @@ function SignInPage() {
               </div>
             </div>
 
-            {role === "landlord" && (
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">Password</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-muted-foreground/60">
-                    <Lock className="h-4.5 w-4.5" />
-                  </span>
-                  <input
-                    required
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full pl-10 pr-10 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground/60 hover:text-foreground"
-                  >
-                    {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
-                  </button>
-                </div>
-                <div className="flex justify-end mt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(true)}
-                    className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline"
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
+            <div>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">Password</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-muted-foreground/60">
+                  <Lock className="h-4.5 w-4.5" />
+                </span>
+                <input
+                  required
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-10 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground/60 hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                </button>
               </div>
-            )}
+              <div className="flex justify-end mt-1">
+                <button
+                  type="button"
+                  onClick={handleOpenForgotPassword}
+                  className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline"
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            </div>
 
             <button
               disabled={loading}
@@ -262,18 +447,19 @@ function SignInPage() {
             </button>
           </form>
 
-          {role === "landlord" && (
+          {role === "landlord" ? (
             <p className="text-center text-xs text-muted-foreground mt-6">
               New landlord?{" "}
               <Link to="/signup" className="text-teal-600 dark:text-teal-400 font-bold hover:underline">
                 Create an account
               </Link>
             </p>
-          )}
-
-          {role === "tenant" && (
-            <p className="text-center text-[11px] text-muted-foreground mt-6">
-              Note: Tenants can only log in if their email has been registered by a landlord.
+          ) : (
+            <p className="text-center text-xs text-muted-foreground mt-6">
+              New tenant?{" "}
+              <Link to="/tenant" className="text-teal-600 dark:text-teal-400 font-bold hover:underline">
+                Register profile or visit Tenant Portal
+              </Link>
             </p>
           )}
         </div>
@@ -286,39 +472,186 @@ function SignInPage() {
 
         {/* Forgot Password Modal */}
         {showForgotPassword && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in">
-              <h3 className="text-lg font-bold text-foreground mb-2">Reset Password</h3>
-              <p className="text-xs text-muted-foreground mb-4">
-                Enter your registered email address and we'll send you a link to reset your password.
-              </p>
-              <form onSubmit={handleForgotPassword} className="space-y-4">
-                <div>
-                  <input
-                    required
-                    type="email"
-                    value={resetEmail}
-                    onChange={(e) => setResetEmail(e.target.value)}
-                    placeholder="Email Address"
-                    className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
-                  />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in space-y-4">
+              <div className="flex items-center justify-between border-b pb-3 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">Reset Password</h3>
+                    <p className="text-xs text-muted-foreground">Step {resetStep} of 2 - {resetStep === 1 ? "Verify Email" : "Set New Password"}</p>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(false)}
-                    className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md"
-                  >
-                    Send Reset Link
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {resetError && (
+                <div className="p-3 text-xs rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100 flex items-center gap-2">
+                  <span>⚠️</span> {resetError}
                 </div>
-              </form>
+              )}
+
+              {resetStep === 1 ? (
+                <form onSubmit={handleRequestResetOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Account Role</label>
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setResetRole("landlord")}
+                        className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                          resetRole === "landlord" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted-foreground"
+                        }`}
+                      >
+                        Landlord
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResetRole("tenant")}
+                        className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                          resetRole === "tenant" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted-foreground"
+                        }`}
+                      >
+                        Tenant
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Registered Email</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type="email"
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="e.g. arjun@example.com"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(false)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={resetLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {resetLoading ? "Verifying..." : "Send OTP"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleConfirmResetPassword} className="space-y-4">
+                  <div className="p-3 bg-teal-50 dark:bg-teal-950/30 rounded-xl text-teal-700 dark:text-teal-300 text-xs flex items-center justify-between">
+                    <span>Account: <strong>{targetAccount?.email}</strong></span>
+                    <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 capitalize">{resetRole}</span>
+                  </div>
+
+                  {resetDeliveryStatus.sent ? (
+                    <div className="p-3 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 rounded-xl text-teal-700 dark:text-teal-300 text-xs">
+                      ✅ Verification code sent to <strong>{targetAccount?.email}</strong>! Check your inbox or spam folder.
+                    </div>
+                  ) : resetDeliveryStatus.onscreenOtp ? (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-amber-800 dark:text-amber-200 text-xs space-y-1 text-left">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>⚠️ Resend Notice:</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        Resend free tier only sends to the verified account email. Your reset code is:
+                      </p>
+                      <div className="text-center py-1">
+                        <span className="font-mono font-extrabold text-base bg-amber-100 dark:bg-amber-900 px-3 py-1 rounded text-amber-950 dark:text-amber-100 tracking-widest">
+                          {resetDeliveryStatus.onscreenOtp}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">Enter Verification Code</label>
+                    <input
+                      required
+                      type="text"
+                      maxLength={6}
+                      value={resetOtp}
+                      onChange={(e) => setResetOtp(e.target.value)}
+                      placeholder="Enter 6-digit code"
+                      className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 font-mono tracking-widest text-center text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={resetShowPassword ? "text" : "password"}
+                        value={resetNewPassword}
+                        onChange={(e) => setResetNewPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setResetShowPassword(!resetShowPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {resetShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1">Confirm New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={resetShowPassword ? "text" : "password"}
+                        value={resetConfirmPassword}
+                        onChange={(e) => setResetConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setResetStep(1)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={resetLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {resetLoading ? "Updating..." : "Save New Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}

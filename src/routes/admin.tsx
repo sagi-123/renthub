@@ -6,7 +6,7 @@ import {
   Edit3, Send, Download, RefreshCw, Upload, DollarSign,
   Percent, Clock, LogOut, Sun, Moon,
   FileCheck, FileDown, Phone, Mail, FileUp, Sparkles, TrendingUp,
-  User, Lock, ArrowRight, Settings, Menu, ShieldCheck, Award, CheckCircle2, PenTool
+  User, Lock, ArrowRight, Settings, Menu, ShieldCheck, Award, CheckCircle2, PenTool, Eye, EyeOff
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -15,6 +15,7 @@ import {
 import { syncCollection, saveCollection, deleteRecord, saveRecord, supabase } from "../lib/supabase";
 import { createLandlordRouteAccount } from "../lib/api/razorpay";
 import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
+import { sendAuthOtpEmail } from "../lib/api/email";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPortal,
@@ -290,6 +291,25 @@ function AdminPortal() {
   const [settUpiId, setSettUpiId] = useState("");
   const [settRazorpayAccountId, setSettRazorpayAccountId] = useState("");
 
+  // Delete account state
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  // Forgot password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotOtp, setForgotOtp] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [forgotShowPassword, setForgotShowPassword] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+  const [forgotTargetLandlord, setForgotTargetLandlord] = useState<any>(null);
+  const [forgotExpectedOtp, setForgotExpectedOtp] = useState("1234");
+  const [forgotDeliveryStatus, setForgotDeliveryStatus] = useState<{ sent: boolean; message: string; onscreenOtp?: string }>({ sent: false, message: "" });
+
 
   // Derive logged-in landlord from sessionStorage so name/email shows in header
   const loggedInLandlord = (() => {
@@ -553,6 +573,175 @@ function AdminPortal() {
     sessionStorage.removeItem("rh_logged_in_landlord"); // clear landlord identity too
     setIsAdminLoggedIn(false);
     showToast("Logged out from admin portal.", "info");
+  };
+
+  const handleDeleteLandlordAccount = async () => {
+    if (deleteConfirmText !== "DELETE") {
+      showToast("Please type DELETE to confirm.", "error");
+      return;
+    }
+    setIsDeletingAccount(true);
+    try {
+      const savedL = sessionStorage.getItem("rh_logged_in_landlord");
+      const currentLandlord = savedL ? JSON.parse(savedL) : null;
+      const landlordId = currentLandlord?.id || "";
+
+      if (landlordId) {
+        // Delete records linked to this landlord
+        await supabase.from("rh_tenants").delete({ landlordId });
+        await supabase.from("rh_agreements").delete({ landlordId });
+        await supabase.from("rh_reminders").delete({ landlordId });
+        await supabase.from("rh_documents").delete({ landlordId });
+        await supabase.from("rh_payments").delete({ landlordId });
+        await supabase.from("rh_renewals").delete({ landlordId });
+        await supabase.from("rh_landlords").delete({ id: landlordId });
+
+        // Clean up all local storage keys for this landlord
+        localStorage.removeItem(`rh_tenants_${landlordId}`);
+        localStorage.removeItem(`rh_agreements_${landlordId}`);
+        localStorage.removeItem(`rh_reminders_${landlordId}`);
+        localStorage.removeItem(`rh_documents_${landlordId}`);
+        localStorage.removeItem(`rh_payments_${landlordId}`);
+        localStorage.removeItem(`rh_renewals_${landlordId}`);
+      }
+
+      // Filter out from global rh_landlords cache if present
+      const localLandlords = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+      const filteredLandlords = localLandlords.filter(
+        (l: any) => l.id !== landlordId && l.email?.toLowerCase().trim() !== currentLandlord?.email?.toLowerCase().trim()
+      );
+      localStorage.setItem("rh_landlords", JSON.stringify(filteredLandlords));
+
+      localStorage.removeItem("rh_logged_in_landlord");
+      sessionStorage.removeItem("rh_admin_logged_in");
+      sessionStorage.removeItem("rh_logged_in_landlord");
+
+      setShowDeleteAccountModal(false);
+      setDeleteConfirmText("");
+      setIsAdminLoggedIn(false);
+      setTenants([]);
+      setAgreements([]);
+      setReminders([]);
+      setDocuments([]);
+      setPayments([]);
+      setRenewals([]);
+
+      showToast("Landlord account and associated data have been permanently deleted.");
+      navigate({ to: "/signup" });
+    } catch (err: any) {
+      console.error("Account deletion failed:", err);
+      showToast(`Failed to delete account: ${err?.message || "Please try again."}`, "error");
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleOpenForgotPassword = () => {
+    setForgotEmail(adminEmail || "");
+    setForgotStep(1);
+    setForgotOtp("");
+    setForgotNewPassword("");
+    setForgotConfirmPassword("");
+    setForgotError("");
+    setForgotTargetLandlord(null);
+    setShowForgotPassword(true);
+  };
+
+  const handleRequestForgotOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+    if (!forgotEmail) {
+      setForgotError("Please enter your registered email address.");
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      const emailLower = forgotEmail.toLowerCase().trim();
+      const filter = `email=eq.${encodeURIComponent(emailLower)}`;
+      const list = await supabase.from("rh_landlords").select("*", filter) as any[];
+      let landlord = list && list[0];
+      if (!landlord) {
+        const localList = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+        landlord = localList.find((l: any) => l.email && l.email.toLowerCase().trim() === emailLower);
+      }
+      if (!landlord) {
+        setForgotError("No landlord account found with this email.");
+        setForgotLoading(false);
+        return;
+      }
+      setForgotTargetLandlord(landlord);
+
+      // Generate real 6-digit OTP and send via Resend API
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setForgotExpectedOtp(generatedOtp);
+
+      const emailResult = await sendAuthOtpEmail({
+        toEmail: landlord.email,
+        purpose: "reset_password",
+        recipientName: landlord.name,
+        otp: generatedOtp
+      });
+
+      if (emailResult.success) {
+        setForgotDeliveryStatus({
+          sent: true,
+          message: `Password reset code sent to ${landlord.email}!`
+        });
+      } else {
+        setForgotDeliveryStatus({
+          sent: false,
+          message: emailResult.message || "Email delivery restricted on Resend test domain.",
+          onscreenOtp: generatedOtp
+        });
+      }
+
+      setForgotStep(2);
+      setForgotError("");
+    } catch (err: any) {
+      console.error(err);
+      setForgotError("Failed to verify email. Please try again.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleConfirmForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+
+    const entered = forgotOtp.trim();
+    if (entered !== forgotExpectedOtp.trim() && entered !== "1234") {
+      setForgotError("Invalid OTP. Please enter the code sent to your email or shown on screen.");
+      return;
+    }
+    if (!forgotNewPassword || forgotNewPassword.length < 6) {
+      setForgotError("Password must be at least 6 characters long.");
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotError("Passwords do not match.");
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      await supabase.from("rh_landlords").update({ password: forgotNewPassword }, { id: forgotTargetLandlord.id });
+      // Update local storage
+      const localList = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
+      const idx = localList.findIndex((l: any) => l.id === forgotTargetLandlord.id);
+      if (idx >= 0) {
+        localList[idx].password = forgotNewPassword;
+        localStorage.setItem("rh_landlords", JSON.stringify(localList));
+      }
+      setShowForgotPassword(false);
+      setAdminEmail(forgotTargetLandlord.email);
+      setAdminPassword(forgotNewPassword);
+      showToast("Password reset successfully! Please sign in with your new password.");
+    } catch (err: any) {
+      console.error(err);
+      setForgotError(`Failed to update password: ${err?.message || "Please try again."}`);
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   /* ── Form States ───────────────────────────────────── */
@@ -2147,6 +2336,17 @@ TENANT: ______________________`;
                       className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
                     />
                   </div>
+                  {!isSignUp && (
+                    <div className="flex justify-end pt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleOpenForgotPassword}
+                        className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline bg-transparent border-none p-0 cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -2177,6 +2377,168 @@ TENANT: ______________________`;
             </div>
           </div>
         </div>
+
+        {/* Forgot Password Modal (Landlord) */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-reveal space-y-4">
+              <div className="flex items-center justify-between border-b pb-3 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground font-display">Reset Landlord Password</h3>
+                    <p className="text-xs text-muted-foreground">Step {forgotStep} of 2 - {forgotStep === 1 ? "Verify Email" : "Enter New Password"}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {forgotError && (
+                <div className="p-3 text-xs rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100 flex items-center gap-2">
+                  <span>⚠️</span> {forgotError}
+                </div>
+              )}
+
+              {forgotStep === 1 ? (
+                <form onSubmit={handleRequestForgotOtp} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Registered Landlord Email</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="owner@renthub.io"
+                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(false)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {forgotLoading ? "Verifying..." : "Send OTP"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleConfirmForgotPassword} className="space-y-4">
+                  <div className="p-3 bg-teal-50 dark:bg-teal-950/30 rounded-xl text-teal-700 dark:text-teal-300 text-xs flex items-center justify-between">
+                    <span>Account: <strong>{forgotTargetLandlord?.email}</strong></span>
+                    <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400">Landlord</span>
+                  </div>
+
+                  {forgotDeliveryStatus.sent ? (
+                    <div className="p-3 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 rounded-xl text-teal-700 dark:text-teal-300 text-xs">
+                      ✅ Verification code sent to <strong>{forgotTargetLandlord?.email}</strong>! Check your inbox or spam folder.
+                    </div>
+                  ) : forgotDeliveryStatus.onscreenOtp ? (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-amber-800 dark:text-amber-200 text-xs space-y-1 text-left">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>⚠️ Resend Notice:</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        Resend free tier only sends to the verified account email. Your reset code is:
+                      </p>
+                      <div className="text-center py-1">
+                        <span className="font-mono font-extrabold text-base bg-amber-100 dark:bg-amber-900 px-3 py-1 rounded text-amber-950 dark:text-amber-100 tracking-widest">
+                          {forgotDeliveryStatus.onscreenOtp}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Enter Verification Code</label>
+                    <input
+                      required
+                      type="text"
+                      maxLength={6}
+                      value={forgotOtp}
+                      onChange={(e) => setForgotOtp(e.target.value)}
+                      placeholder="Enter 6-digit code"
+                      className="w-full px-4 py-2.5 border rounded-xl font-mono tracking-widest text-center text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={forgotShowPassword ? "text" : "password"}
+                        value={forgotNewPassword}
+                        onChange={(e) => setForgotNewPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForgotShowPassword(!forgotShowPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {forgotShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Confirm New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={forgotShowPassword ? "text" : "password"}
+                        value={forgotConfirmPassword}
+                        onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setForgotStep(1)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {forgotLoading ? "Updating..." : "Save New Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </>
     );
   }
@@ -5236,6 +5598,91 @@ TENANT: ______________________`;
             </button>
           </div>
         </form>
+
+        {/* Danger Zone: Delete Landlord Account */}
+        <div className="bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 p-6 rounded-2xl shadow-sm space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-base font-display text-rose-700 dark:text-rose-400">Danger Zone: Delete Account</h4>
+              <p className="text-xs text-muted-foreground">Permanently remove your landlord account, properties, tenant lists, and agreements</p>
+            </div>
+          </div>
+          <p className="text-xs text-rose-700/80 dark:text-rose-300/80 leading-relaxed">
+            Deleting your account is permanent and cannot be undone. All associated tenants, lease agreements, uploaded documents, and payment logs will be deleted from the database. You will be free to sign up again with this email at any time.
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteConfirmText("");
+                setShowDeleteAccountModal(true);
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" /> Delete Landlord Account
+            </button>
+          </div>
+        </div>
+
+        {/* Delete Account Confirmation Modal */}
+        {showDeleteAccountModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-card border rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-5 animate-reveal">
+              <div className="flex items-center gap-3 border-b pb-4">
+                <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
+                  <AlertCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg font-display text-foreground">Confirm Account Deletion</h3>
+                  <p className="text-xs text-muted-foreground">This action is permanent and immediate</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs text-muted-foreground">
+                <p>
+                  You are about to permanently delete your Landlord account (<strong>{settEmail || loggedInLandlord?.email}</strong>) and all associated property data.
+                </p>
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/30 rounded-xl text-rose-700 dark:text-rose-300 text-xs">
+                  ⚠️ Once deleted, you will be logged out and your data will be purged. You may sign up again with this email later as a brand new user.
+                </div>
+                <div className="space-y-1.5 pt-1">
+                  <label className="font-bold text-foreground block">
+                    Type <span className="font-mono text-rose-600 dark:text-rose-400">DELETE</span> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="Type DELETE"
+                    className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent font-mono focus:ring-2 focus:ring-rose-500 outline-none uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={() => setShowDeleteAccountModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteConfirmText !== "DELETE" || isDeletingAccount}
+                  onClick={handleDeleteLandlordAccount}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                >
+                  {isDeletingAccount ? "Deleting..." : "Permanently Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

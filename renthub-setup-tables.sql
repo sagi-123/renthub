@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.rh_tenants (
     "landlordId" TEXT REFERENCES public.rh_landlords("id") ON DELETE CASCADE,
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL UNIQUE,
+    "password" TEXT,
     "phone" TEXT,
     "unit" TEXT NOT NULL,
     "rentAmount" NUMERIC NOT NULL,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS public.rh_tenants (
 
 ALTER TABLE public.rh_tenants ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read, write, update, delete on rh_tenants" ON public.rh_tenants FOR ALL USING (true) WITH CHECK (true);
+ALTER TABLE public.rh_tenants ADD COLUMN IF NOT EXISTS "password" TEXT;
 
 
 -- 3. AGREEMENTS TABLE

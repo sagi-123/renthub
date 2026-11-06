@@ -29,7 +29,7 @@ async function supabaseFetch(path: string, options: RequestInit = {}) {
 // All columns now exist in the DB — data is fully cloud-backed.
 const SCHEMA_COLUMNS: Record<string, string[]> = {
   rh_tenants: [
-    "id", "landlordId", "name", "email", "phone", "unit", "rentAmount",
+    "id", "landlordId", "name", "email", "password", "phone", "unit", "rentAmount",
     "depositAmount", "paymentStatus", "dueDate", "leaseStart", "leaseEnd",
     "residentialAddress", "propertyName", "blockNumber", "propertyAddress", "createdAt"
   ],
@@ -99,36 +99,78 @@ export const supabase = {
     },
     insert: async (data: any) => {
       const sanitized = sanitizePayload(table, data, true);
-      return supabaseFetch(table, {
-        method: "POST",
-        body: JSON.stringify(sanitized),
-        headers: {
-          "Prefer": "return=representation",
-        },
-      });
+      try {
+        return await supabaseFetch(table, {
+          method: "POST",
+          body: JSON.stringify(sanitized),
+          headers: {
+            "Prefer": "return=representation",
+          },
+        });
+      } catch (err: any) {
+        if (table === "rh_tenants" && err?.message?.toLowerCase().includes("password")) {
+          const fallback = sanitizePayload("rh_tenants", data, false);
+          delete fallback.password;
+          return await supabaseFetch(table, {
+            method: "POST",
+            body: JSON.stringify(fallback),
+            headers: { "Prefer": "return=representation" },
+          });
+        }
+        throw err;
+      }
     },
     upsert: async (data: any) => {
       const sanitized = sanitizePayload(table, data, true);
-      return supabaseFetch(table, {
-        method: "POST",
-        body: JSON.stringify(sanitized),
-        headers: {
-          "Prefer": "resolution=merge-duplicates,return=representation",
-        },
-      });
+      try {
+        return await supabaseFetch(table, {
+          method: "POST",
+          body: JSON.stringify(sanitized),
+          headers: {
+            "Prefer": "resolution=merge-duplicates,return=representation",
+          },
+        });
+      } catch (err: any) {
+        if (table === "rh_tenants" && err?.message?.toLowerCase().includes("password")) {
+          const fallback = sanitizePayload("rh_tenants", data, false);
+          delete fallback.password;
+          return await supabaseFetch(table, {
+            method: "POST",
+            body: JSON.stringify(fallback),
+            headers: { "Prefer": "resolution=merge-duplicates,return=representation" },
+          });
+        }
+        throw err;
+      }
     },
     update: async (data: any, match: Record<string, any>) => {
       const sanitized = sanitizePayload(table, data, false);
       const matchQuery = Object.entries(match)
         .map(([k, v]) => `${k}=eq.${encodeURIComponent(v)}`)
         .join("&");
-      return supabaseFetch(`${table}?${matchQuery}`, {
-        method: "PATCH",
-        body: JSON.stringify(sanitized),
-        headers: {
-          "Prefer": "return=representation",
-        },
-      });
+      try {
+        return await supabaseFetch(`${table}?${matchQuery}`, {
+          method: "PATCH",
+          body: JSON.stringify(sanitized),
+          headers: {
+            "Prefer": "return=representation",
+          },
+        });
+      } catch (err: any) {
+        if (table === "rh_tenants" && err?.message?.toLowerCase().includes("password")) {
+          const fallback = { ...sanitized };
+          delete fallback.password;
+          if (Object.keys(fallback).length > 0) {
+            return await supabaseFetch(`${table}?${matchQuery}`, {
+              method: "PATCH",
+              body: JSON.stringify(fallback),
+              headers: { "Prefer": "return=representation" },
+            });
+          }
+          return null;
+        }
+        throw err;
+      }
     },
     delete: async (match: Record<string, any>) => {
       const matchQuery = Object.entries(match)

@@ -103,3 +103,109 @@ export async function sendOtpEmail(input: OtpEmailInput) {
     };
   }
 }
+
+export interface AuthOtpInput {
+  toEmail: string;
+  purpose: "signup" | "reset_password";
+  recipientName?: string;
+  otp: string;
+}
+
+export async function sendAuthOtpEmail(input: AuthOtpInput) {
+  const resendApiKey = import.meta.env.VITE_RESEND_API_KEY;
+
+  if (!resendApiKey) {
+    console.warn("⚠️ VITE_RESEND_API_KEY not set in .env");
+    return {
+      success: false,
+      devMode: true,
+      otp: input.otp,
+      message: "VITE_RESEND_API_KEY not set in .env. Using onscreen OTP."
+    };
+  }
+
+  const isReset = input.purpose === "reset_password";
+  const subject = isReset
+    ? `RentHub: ${input.otp} is your password reset code`
+    : `RentHub: ${input.otp} is your email verification code`;
+
+  const title = isReset ? "Password Reset Verification" : "Email Verification";
+  const bodyText = isReset
+    ? "We received a request to reset your RentHub account password. Use the verification code below to set a new password:"
+    : "Thank you for joining RentHub! Use the verification code below to verify your email and activate your account:";
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: "RentHub Security <onboarding@resend.dev>",
+        to: [input.toEmail],
+        subject,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #0d9488, #0f766e); padding: 20px 24px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">🏢 RentHub</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 6px 0 0; font-size: 13px;">${title}</p>
+            </div>
+
+            <p style="color: #334155; font-size: 15px; margin: 0 0 12px;">Hello ${input.recipientName ? `<strong>${input.recipientName}</strong>` : "there"},</p>
+            <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">${bodyText}</p>
+
+            <div style="background: #f0fdfa; border: 2px dashed #0d9488; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px;">
+              <p style="margin: 0 0 6px; font-size: 11px; color: #0d9488; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;">One-Time Verification Code</p>
+              <p style="margin: 0; font-size: 38px; font-weight: 900; letter-spacing: 8px; color: #0f766e; font-family: monospace;">${input.otp}</p>
+            </div>
+
+            <p style="color: #64748b; font-size: 12px; line-height: 1.6; margin: 0 0 8px;">
+              ⏱ This code is valid for <strong>10 minutes</strong>. Do not share this code with anyone.
+            </p>
+            <p style="color: #94a3b8; font-size: 12px; line-height: 1.6; margin: 0;">
+              If you did not request this, please ignore this email or contact support.
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0 16px;">
+            <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">RentHub Secure Authentication Gateway • Automated Notification</p>
+          </div>
+        `
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let errMsg = errText;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson?.message) errMsg = errJson.message;
+      } catch (_) {}
+
+      console.warn("Resend API warning:", errMsg);
+      return {
+        success: false,
+        devMode: false,
+        otp: input.otp,
+        error: errMsg,
+        message: errMsg
+      };
+    }
+
+    return {
+      success: true,
+      devMode: false,
+      otp: input.otp,
+      message: `Verification code sent to ${input.toEmail}`
+    };
+  } catch (err: any) {
+    console.error("sendAuthOtpEmail error:", err);
+    return {
+      success: false,
+      devMode: true,
+      otp: input.otp,
+      error: err.message,
+      message: err.message || "Failed to dispatch email."
+    };
+  }
+}

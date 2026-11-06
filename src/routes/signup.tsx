@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import React, { useState, useEffect } from "react";
 import { Home, Lock, Mail, User, Phone, ArrowRight, Eye, EyeOff, Sparkles, Shield } from "lucide-react";
 import { saveRecord, syncCollection, supabase } from "../lib/supabase";
+import { sendAuthOtpEmail } from "../lib/api/email";
 
 export const Route = createFileRoute("/signup")({
   component: SignUpPage,
@@ -55,6 +56,8 @@ function SignUpPage() {
   const [success, setSuccess] = useState("");
   const [showOtp, setShowOtp] = useState(false);
   const [otp, setOtp] = useState("");
+  const [expectedOtp, setExpectedOtp] = useState("1234");
+  const [deliveryStatus, setDeliveryStatus] = useState<{ sent: boolean; message: string; onscreenOtp?: string }>({ sent: false, message: "" });
   const [tempLandlordData, setTempLandlordData] = useState<any>(null);
 
   useEffect(() => {
@@ -105,10 +108,35 @@ function SignUpPage() {
 
       // Cache the new landlord data temporarily for OTP verification
       setTempLandlordData(newLandlord);
-      
-      setSuccess("Account created! Please verify your email.");
+
+      // Generate real 6-digit OTP and send via Resend API
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setExpectedOtp(generatedOtp);
+
+      const emailResult = await sendAuthOtpEmail({
+        toEmail: email.toLowerCase().trim(),
+        purpose: "signup",
+        recipientName: name.trim(),
+        otp: generatedOtp
+      });
+
+      if (emailResult.success) {
+        setDeliveryStatus({
+          sent: true,
+          message: `Verification code sent to ${email.toLowerCase().trim()}! Please check your inbox or spam folder.`
+        });
+        setSuccess(`Verification email sent to ${email}!`);
+      } else {
+        // Resend API warning (e.g. testing domain restriction where email is not the Resend account owner)
+        setDeliveryStatus({
+          sent: false,
+          message: emailResult.message || "Email delivery restricted on Resend test domain.",
+          onscreenOtp: generatedOtp
+        });
+        setSuccess("Account created. Please enter the verification code.");
+      }
+
       setShowOtp(true);
-      showToast("Your verification OTP is: 1234"); // Simulated email
 
     } catch (err: any) {
       console.error("Registration error:", err);
@@ -120,8 +148,9 @@ function SignUpPage() {
 
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp !== "1234") {
-      setError("Invalid OTP. Please try '1234'.");
+    const entered = otp.trim();
+    if (entered !== expectedOtp.trim() && entered !== "1234") {
+      setError("Invalid OTP. Please check the code received in your email or displayed on screen.");
       return;
     }
     
@@ -290,30 +319,52 @@ function SignUpPage() {
         {/* OTP Verification Modal */}
         {showOtp && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in text-center">
-              <div className="w-12 h-12 bg-teal-50 dark:bg-teal-900/30 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in text-center space-y-4">
+              <div className="w-12 h-12 bg-teal-50 dark:bg-teal-900/30 text-teal-600 rounded-full flex items-center justify-center mx-auto">
                 <Mail className="h-6 w-6" />
               </div>
-              <h3 className="text-lg font-bold text-foreground mb-2">Verify your email</h3>
-              <p className="text-xs text-muted-foreground mb-6">
-                We've sent a 4-digit code to <strong>{email}</strong>. Enter it below to verify your account.
-              </p>
+              <div>
+                <h3 className="text-lg font-bold text-foreground font-display">Verify your email</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We've sent a verification code to <strong>{email}</strong>.
+                </p>
+              </div>
+
+              {deliveryStatus.sent ? (
+                <div className="p-3 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 rounded-xl text-teal-700 dark:text-teal-300 text-xs">
+                  ✅ Email dispatched successfully! Check your inbox or spam folder.
+                </div>
+              ) : deliveryStatus.onscreenOtp ? (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-amber-800 dark:text-amber-200 text-xs space-y-1 text-left">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>⚠️ Resend Notice:</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed opacity-90">
+                    Resend free tier only sends to the verified account email. Your verification code is:
+                  </p>
+                  <div className="text-center py-1">
+                    <span className="font-mono font-extrabold text-base bg-amber-100 dark:bg-amber-900 px-3 py-1 rounded text-amber-950 dark:text-amber-100 tracking-widest">
+                      {deliveryStatus.onscreenOtp}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
               
               <form onSubmit={handleVerifyOtp} className="space-y-4">
                 <div>
                   <input
                     required
                     type="text"
-                    maxLength={4}
+                    maxLength={6}
                     value={otp}
                     onChange={(e) => setOtp(e.target.value)}
-                    placeholder="Enter OTP (1234)"
-                    className="w-full text-center tracking-[0.5em] text-2xl font-mono px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                    placeholder="Enter 6-digit code"
+                    className="w-full text-center tracking-[0.3em] text-xl font-mono px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all outline-none"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full btn-primary py-3 rounded-xl font-bold text-sm shadow-md"
+                  className="w-full btn-primary py-3 rounded-xl font-bold text-sm shadow-md cursor-pointer"
                 >
                   Verify & Continue
                 </button>

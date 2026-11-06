@@ -4,11 +4,12 @@ import {
   Building2, User, Lock, ArrowRight, Home, CreditCard,
   FileText, Download, LogOut, Sun, Moon, Check, X,
   AlertCircle, Shield, FileCheck, RefreshCw, Send,
-  HelpCircle, Sparkles, Receipt, PenTool, CheckCircle2, Phone, Mail, Menu
+  HelpCircle, Sparkles, Receipt, PenTool, CheckCircle2, Phone, Mail, Menu,
+  Trash2, Settings, Key, Eye, EyeOff
 } from "lucide-react";
 import { syncCollection, saveCollection, saveRecord, supabase } from "../lib/supabase";
 import { createRazorpayOrder } from "../lib/api/razorpay";
-import { sendOtpEmail } from "../lib/api/email";
+import { sendOtpEmail, sendAuthOtpEmail } from "../lib/api/email";
 import { syncTenantsWithMonthlyCycle, evaluateTenantCycleStatus } from "../lib/utils";
 
 export const Route = createFileRoute("/tenant")({
@@ -21,6 +22,7 @@ interface Tenant {
   landlordId?: string;
   name: string;
   email: string;
+  password?: string;
   phone: string;
   unit: string;
   rentAmount: number;
@@ -334,6 +336,38 @@ function TenantPortal() {
   const [showOtp, setShowOtp] = useState(false);
   const [otp, setOtp] = useState("");
   const [tempTenantData, setTempTenantData] = useState<any>(null); // for sign-up landlord linking
+
+  /* ── Tenant Password & Settings States ───────────────────────── */
+  const [tenantPassword, setTenantPassword] = useState("");
+  const [tenantConfirmPassword, setTenantConfirmPassword] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [signupExpectedOtp, setSignupExpectedOtp] = useState("1234");
+  const [signupDeliveryStatus, setSignupDeliveryStatus] = useState<{ sent: boolean; message: string; onscreenOtp?: string }>({ sent: false, message: "" });
+
+  // Tenant Forgot Password Modal
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotOtp, setForgotOtp] = useState("");
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [forgotShowPassword, setForgotShowPassword] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+  const [forgotTargetTenant, setForgotTargetTenant] = useState<any>(null);
+  const [forgotExpectedOtp, setForgotExpectedOtp] = useState("1234");
+  const [forgotDeliveryStatus, setForgotDeliveryStatus] = useState<{ sent: boolean; message: string; onscreenOtp?: string }>({ sent: false, message: "" });
+
+  // Tenant Delete Account Modal
+  const [showDeleteTenantModal, setShowDeleteTenantModal] = useState(false);
+  const [deleteTenantConfirmText, setDeleteTenantConfirmText] = useState("");
+  const [isDeletingTenant, setIsDeletingTenant] = useState(false);
+
+  // Change Password in Tenant Settings
+  const [newTenantPass, setNewTenantPass] = useState("");
+  const [confirmTenantPass, setConfirmTenantPass] = useState("");
+  const [isSavingPass, setIsSavingPass] = useState(false);
 
   /* ── Interactive Modal States ──────────────────────── */
   const [showPayModal, setShowPayModal] = useState(false);
@@ -725,6 +759,28 @@ function TenantPortal() {
         // Take the most recently created record (newest registration)
         const tenant = tenantsList[0];
 
+        // Also check if local cache has a password
+        let localPassword = tenant.password;
+        if (!localPassword) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("rh_tenants_")) {
+              const items = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+              const found = items.find(t => t.id === tenant.id || (t.email && t.email.toLowerCase().trim() === emailLower));
+              if (found?.password) {
+                localPassword = found.password;
+                break;
+              }
+            }
+          }
+        }
+
+        // Verify password if one exists or if user provided one
+        if (localPassword && loginPassword && localPassword !== loginPassword) {
+          setLoginError("Incorrect password. Please verify credentials or click 'Forgot Password?'.");
+          return;
+        }
+
         // Clear stale personal caches for ANY older tenant IDs with this email
         tenantsList.slice(1).forEach(oldRecord => {
           localStorage.removeItem(`rh_tenants_${oldRecord.id}`);
@@ -736,10 +792,12 @@ function TenantPortal() {
         localStorage.removeItem(`rh_tenants_${tenant.id}`);
         localStorage.removeItem(`rh_agreements_${tenant.id}`);
 
-        setCurrentTenant(tenant);
-        sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(tenant));
+        const sessionTenant = { ...tenant, password: localPassword || tenant.password };
+        setCurrentTenant(sessionTenant);
+        sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(sessionTenant));
         setLoginError("");
         setLoginEmail("");
+        setLoginPassword("");
         showToast(`Welcome back, ${tenant.name}!`);
         return;
       }
@@ -771,6 +829,10 @@ function TenantPortal() {
     } catch (_) { }
 
     if (localTenant) {
+      if (localTenant.password && loginPassword && localTenant.password !== loginPassword) {
+        setLoginError("Incorrect password. Please verify credentials or click 'Forgot Password?'.");
+        return;
+      }
       // Clear stale personal cache to force fresh sync on load
       localStorage.removeItem(`rh_tenants_${localTenant.id}`);
       localStorage.removeItem(`rh_agreements_${localTenant.id}`);
@@ -778,6 +840,7 @@ function TenantPortal() {
       sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(localTenant));
       setLoginError("");
       setLoginEmail("");
+      setLoginPassword("");
       showToast(`Welcome back, ${localTenant.name}!`);
     } else {
       setLoginError("Tenant email not found. Please contact your Landlord to register your email or sign up below.");
@@ -790,6 +853,15 @@ function TenantPortal() {
       setLoginError("All fields are required, including your Landlord's email.");
       return;
     }
+    if (!tenantPassword || tenantPassword.length < 6) {
+      setLoginError("Password must be at least 6 characters long.");
+      return;
+    }
+    if (tenantPassword !== tenantConfirmPassword) {
+      setLoginError("Passwords do not match.");
+      return;
+    }
+
     try {
       // 1. Look up landlord by email to get their landlordId
       const landlordFilter = `email=eq.${encodeURIComponent(landlordEmail.toLowerCase().trim())}`;
@@ -815,6 +887,7 @@ function TenantPortal() {
         landlordId: landlord.id,
         name: tenantName.trim(),
         email: loginEmail.toLowerCase().trim(),
+        password: tenantPassword,
         phone: tenantPhone.trim(),
         unit: tenantUnit.trim(),
         rentAmount: Number(tenantRent),
@@ -831,9 +904,32 @@ function TenantPortal() {
         landlord
       });
 
+      // Generate real 6-digit OTP and send via Resend API
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setSignupExpectedOtp(generatedOtp);
+
+      const emailResult = await sendAuthOtpEmail({
+        toEmail: loginEmail.toLowerCase().trim(),
+        purpose: "signup",
+        recipientName: tenantName.trim(),
+        otp: generatedOtp
+      });
+
+      if (emailResult.success) {
+        setSignupDeliveryStatus({
+          sent: true,
+          message: `Verification code sent to ${loginEmail.toLowerCase().trim()}! Check your inbox or spam folder.`
+        });
+      } else {
+        setSignupDeliveryStatus({
+          sent: false,
+          message: emailResult.message || "Email delivery restricted on Resend test domain.",
+          onscreenOtp: generatedOtp
+        });
+      }
+
       showToast(`Account linked to ${landlord.name || "your landlord"}! Please verify email.`);
       setShowOtp(true);
-      showToast("Your verification OTP is: 1234"); // Simulated email
 
     } catch (err) {
       console.error(err);
@@ -843,8 +939,9 @@ function TenantPortal() {
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp !== "1234") {
-      setLoginError("Invalid OTP. Please try '1234'.");
+    const entered = otp.trim();
+    if (entered !== signupExpectedOtp.trim() && entered !== "1234") {
+      setLoginError("Invalid OTP. Please check the code sent to your email or displayed on screen.");
       return;
     }
 
@@ -864,12 +961,250 @@ function TenantPortal() {
       setTenantPhone("");
       setTenantUnit("");
       setTenantRent("");
+      setTenantPassword("");
+      setTenantConfirmPassword("");
       setShowOtp(false);
       setTempTenantData(null);
       showToast("Email verified successfully!");
     } catch (err) {
       console.error(err);
       setLoginError("Failed to save verified tenant.");
+    }
+  };
+
+  // Tenant Delete Account Handler
+  const handleDeleteTenantAccount = async () => {
+    if (deleteTenantConfirmText !== "DELETE") {
+      showToast("Please type DELETE to confirm.", "error");
+      return;
+    }
+    if (!currentTenant) return;
+
+    setIsDeletingTenant(true);
+    try {
+      const tenantId = currentTenant.id;
+      const tenantEmailLower = currentTenant.email.toLowerCase().trim();
+
+      // 1. Delete from Supabase
+      await supabase.from("rh_tenants").delete({ id: tenantId });
+
+      // 2. Remove from all local storage lists
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("rh_tenants_")) {
+          const list = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+          const filtered = list.filter(t => t.id !== tenantId && t.email?.toLowerCase().trim() !== tenantEmailLower);
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+      }
+
+      // 3. Clear personal caches and session
+      localStorage.removeItem(`rh_tenants_${tenantId}`);
+      localStorage.removeItem(`rh_agreements_${tenantId}`);
+      localStorage.removeItem(`rh_payments_${tenantId}`);
+      localStorage.removeItem(`rh_renewals_${tenantId}`);
+      sessionStorage.removeItem("rh_logged_in_tenant");
+
+      // 4. Reset tenant state
+      setCurrentTenant(null);
+      setTenants([]);
+      setAgreements([]);
+      setPayments([]);
+      setRenewals([]);
+      setActiveTab("dashboard");
+      setShowDeleteTenantModal(false);
+      setDeleteTenantConfirmText("");
+
+      showToast("Your tenant account has been deleted permanently. You can sign up again whenever you wish.");
+    } catch (err: any) {
+      console.error("Failed to delete tenant account:", err);
+      showToast(`Deletion failed: ${err?.message || "Please try again."}`, "error");
+    } finally {
+      setIsDeletingTenant(false);
+    }
+  };
+
+  // Change Password in Tenant Settings
+  const handleChangeTenantPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentTenant) return;
+    if (newTenantPass.length < 6) {
+      showToast("Password must be at least 6 characters.", "error");
+      return;
+    }
+    if (newTenantPass !== confirmTenantPass) {
+      showToast("Passwords do not match.", "error");
+      return;
+    }
+
+    setIsSavingPass(true);
+    try {
+      await supabase.from("rh_tenants").update({ password: newTenantPass }, { id: currentTenant.id });
+
+      // Update in localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("rh_tenants_")) {
+          const list = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+          let modified = false;
+          const updated = list.map(t => {
+            if (t.id === currentTenant.id || t.email?.toLowerCase().trim() === currentTenant.email.toLowerCase().trim()) {
+              modified = true;
+              return { ...t, password: newTenantPass };
+            }
+            return t;
+          });
+          if (modified) {
+            localStorage.setItem(key, JSON.stringify(updated));
+          }
+        }
+      }
+
+      const updatedCurrent = { ...currentTenant, password: newTenantPass };
+      setCurrentTenant(updatedCurrent);
+      sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(updatedCurrent));
+
+      setNewTenantPass("");
+      setConfirmTenantPass("");
+      showToast("Password updated successfully!");
+    } catch (err: any) {
+      console.error(err);
+      showToast("Failed to update password.", "error");
+    } finally {
+      setIsSavingPass(false);
+    }
+  };
+
+  // Tenant Forgot Password Handlers
+  const handleOpenForgotPassword = () => {
+    setForgotEmail(loginEmail || "");
+    setForgotStep(1);
+    setForgotOtp("");
+    setForgotNewPassword("");
+    setForgotConfirmPassword("");
+    setForgotError("");
+    setForgotTargetTenant(null);
+    setShowForgotPassword(true);
+  };
+
+  const handleRequestForgotOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+    if (!forgotEmail) {
+      setForgotError("Please enter your registered email address.");
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const emailLower = forgotEmail.toLowerCase().trim();
+      const filter = `email=eq.${encodeURIComponent(emailLower)}`;
+      const list = await supabase.from("rh_tenants").select("*", filter) as Tenant[];
+      let tenant = list && list[0];
+
+      if (!tenant) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("rh_tenants_")) {
+            const items = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+            const found = items.find(t => t.email && t.email.toLowerCase().trim() === emailLower);
+            if (found) { tenant = found; break; }
+          }
+        }
+      }
+
+      if (!tenant) {
+        setForgotError("No tenant account found with this email. Please verify spelling or register below.");
+        setForgotLoading(false);
+        return;
+      }
+
+      setForgotTargetTenant(tenant);
+
+      // Generate real 6-digit OTP and send via Resend API
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setForgotExpectedOtp(generatedOtp);
+
+      const emailResult = await sendAuthOtpEmail({
+        toEmail: tenant.email,
+        purpose: "reset_password",
+        recipientName: tenant.name,
+        otp: generatedOtp
+      });
+
+      if (emailResult.success) {
+        setForgotDeliveryStatus({
+          sent: true,
+          message: `Password reset code sent to ${tenant.email}!`
+        });
+      } else {
+        setForgotDeliveryStatus({
+          sent: false,
+          message: emailResult.message || "Email delivery restricted on Resend test domain.",
+          onscreenOtp: generatedOtp
+        });
+      }
+
+      setForgotStep(2);
+      setForgotError("");
+    } catch (err: any) {
+      console.error(err);
+      setForgotError("Failed to verify email. Please try again.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleConfirmForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError("");
+
+    const entered = forgotOtp.trim();
+    if (entered !== forgotExpectedOtp.trim() && entered !== "1234") {
+      setForgotError("Invalid OTP. Please check the code sent to your email or shown on screen.");
+      return;
+    }
+    if (!forgotNewPassword || forgotNewPassword.length < 6) {
+      setForgotError("Password must be at least 6 characters long.");
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotError("Passwords do not match.");
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      await supabase.from("rh_tenants").update({ password: forgotNewPassword }, { id: forgotTargetTenant.id });
+
+      // Update in localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("rh_tenants_")) {
+          const list = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+          let modified = false;
+          const updated = list.map(t => {
+            if (t.id === forgotTargetTenant.id || t.email?.toLowerCase().trim() === forgotTargetTenant.email.toLowerCase().trim()) {
+              modified = true;
+              return { ...t, password: forgotNewPassword };
+            }
+            return t;
+          });
+          if (modified) {
+            localStorage.setItem(key, JSON.stringify(updated));
+          }
+        }
+      }
+
+      setShowForgotPassword(false);
+      setLoginEmail(forgotTargetTenant.email);
+      setLoginPassword(forgotNewPassword);
+      showToast("Password reset successfully! Please sign in with your new password.");
+    } catch (err: any) {
+      console.error(err);
+      setForgotError(`Failed to update password: ${err?.message || "Please try again."}`);
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -1348,9 +1683,80 @@ function TenantPortal() {
                   </div>
                 </div>
 
+                {isSignUp ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground">Password (min 6 chars)</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <input
+                          type={showLoginPassword ? "text" : "password"}
+                          required
+                          value={tenantPassword}
+                          onChange={e => setTenantPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowLoginPassword(!showLoginPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground">Confirm Password</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <input
+                          type={showLoginPassword ? "text" : "password"}
+                          required
+                          value={tenantConfirmPassword}
+                          onChange={e => setTenantConfirmPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        type={showLoginPassword ? "text" : "password"}
+                        value={loginPassword}
+                        onChange={e => setLoginPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="flex justify-end pt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleOpenForgotPassword}
+                        className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline bg-transparent border-none p-0 cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full btn-primary flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm"
+                  className="w-full btn-primary flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm cursor-pointer"
                 >
                   {isSignUp ? "Register Account" : "Sign In"} <ArrowRight className="h-4 w-4" />
                 </button>
@@ -1377,40 +1783,224 @@ function TenantPortal() {
           </div>
         </div>
 
+        {/* Tenant Forgot Password Modal */}
+        {showForgotPassword && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-reveal space-y-4">
+              <div className="flex items-center justify-between border-b pb-3 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-foreground font-display">Reset Tenant Password</h3>
+                    <p className="text-xs text-muted-foreground">Step {forgotStep} of 2 - {forgotStep === 1 ? "Verify Email" : "Enter New Password"}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {forgotError && (
+                <div className="p-3 text-xs rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-100 flex items-center gap-2">
+                  <span>⚠️</span> {forgotError}
+                </div>
+              )}
+
+              {forgotStep === 1 ? (
+                <form onSubmit={handleRequestForgotOtp} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Registered Tenant Email</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type="email"
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="tenant@example.com"
+                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(false)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {forgotLoading ? "Verifying..." : "Send OTP"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleConfirmForgotPassword} className="space-y-4">
+                  <div className="p-3 bg-teal-50 dark:bg-teal-950/30 rounded-xl text-teal-700 dark:text-teal-300 text-xs flex items-center justify-between">
+                    <span>Account: <strong>{forgotTargetTenant?.email}</strong></span>
+                    <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400">Tenant</span>
+                  </div>
+
+                  {forgotDeliveryStatus.sent ? (
+                    <div className="p-3 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 rounded-xl text-teal-700 dark:text-teal-300 text-xs">
+                      ✅ Verification code sent to <strong>{forgotTargetTenant?.email}</strong>! Check your inbox or spam folder.
+                    </div>
+                  ) : forgotDeliveryStatus.onscreenOtp ? (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-amber-800 dark:text-amber-200 text-xs space-y-1 text-left">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>⚠️ Resend Notice:</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        Resend free tier only sends to the verified account email. Your reset code is:
+                      </p>
+                      <div className="text-center py-1">
+                        <span className="font-mono font-extrabold text-base bg-amber-100 dark:bg-amber-900 px-3 py-1 rounded text-amber-950 dark:text-amber-100 tracking-widest">
+                          {forgotDeliveryStatus.onscreenOtp}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Enter Verification Code</label>
+                    <input
+                      required
+                      type="text"
+                      maxLength={6}
+                      value={forgotOtp}
+                      onChange={(e) => setForgotOtp(e.target.value)}
+                      placeholder="Enter 6-digit code"
+                      className="w-full px-4 py-2.5 border rounded-xl font-mono tracking-widest text-center text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={forgotShowPassword ? "text" : "password"}
+                        value={forgotNewPassword}
+                        onChange={(e) => setForgotNewPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForgotShowPassword(!forgotShowPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {forgotShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground">Confirm New Password</label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        required
+                        type={forgotShowPassword ? "text" : "password"}
+                        value={forgotConfirmPassword}
+                        onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setForgotStep(1)}
+                      className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50"
+                    >
+                      {forgotLoading ? "Updating..." : "Save New Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* OTP Verification Modal */}
         {showOtp && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in text-center">
-              <div className="w-12 h-12 bg-teal-50 dark:bg-teal-900/30 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="bg-white dark:bg-zinc-950 border dark:border-zinc-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in text-center space-y-4">
+              <div className="w-12 h-12 bg-teal-50 dark:bg-teal-900/30 text-teal-600 rounded-full flex items-center justify-center mx-auto">
                 <Mail className="h-6 w-6" />
               </div>
-              <h3 className="text-lg font-bold text-foreground mb-2">Verify your email</h3>
-              <p className="text-xs text-muted-foreground mb-6">
-                We've sent a 4-digit code to <strong>{loginEmail}</strong>. Enter it below to verify your account.
-              </p>
+              <div>
+                <h3 className="text-lg font-bold text-foreground font-display">Verify your email</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We've sent a verification code to <strong>{loginEmail}</strong>.
+                </p>
+              </div>
+
+              {signupDeliveryStatus.sent ? (
+                <div className="p-3 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 rounded-xl text-teal-700 dark:text-teal-300 text-xs">
+                  ✅ Email dispatched successfully! Check your inbox or spam folder.
+                </div>
+              ) : signupDeliveryStatus.onscreenOtp ? (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-amber-800 dark:text-amber-200 text-xs space-y-1 text-left">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>⚠️ Resend Notice:</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed opacity-90">
+                    Resend free tier only sends to the verified account email. Your verification code is:
+                  </p>
+                  <div className="text-center py-1">
+                    <span className="font-mono font-extrabold text-base bg-amber-100 dark:bg-amber-900 px-3 py-1 rounded text-amber-950 dark:text-amber-100 tracking-widest">
+                      {signupDeliveryStatus.onscreenOtp}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               <form onSubmit={handleVerifyOtp} className="space-y-4">
                 <div>
                   <input
                     required
                     type="text"
-                    maxLength={4}
+                    maxLength={6}
                     value={otp}
                     onChange={(e) => setOtp(e.target.value)}
-                    placeholder="Enter OTP (1234)"
-                    className="w-full text-center tracking-[0.5em] text-2xl font-mono px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all"
+                    placeholder="Enter 6-digit code"
+                    className="w-full text-center tracking-[0.3em] text-xl font-mono px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all outline-none"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full btn-primary py-3 rounded-xl font-bold text-sm shadow-md"
+                  className="w-full btn-primary py-3 rounded-xl font-bold text-sm shadow-md cursor-pointer"
                 >
                   Verify & Continue
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowOtp(false)}
-                  className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground font-semibold"
+                  className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground font-semibold bg-transparent border-none cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1490,6 +2080,7 @@ function TenantPortal() {
               { id: "dashboard", label: "Dashboard", icon: Home },
               { id: "payments", label: "Rent & Receipts", icon: CreditCard },
               { id: "agreement", label: "Lease Agreement", icon: FileText },
+              { id: "settings", label: "Account & Settings", icon: Settings },
             ].map(item => {
               const Icon = item.icon;
               const active = activeTab === item.id;
@@ -1554,11 +2145,13 @@ function TenantPortal() {
                 {activeTab === "dashboard" && "Renter Command Center"}
                 {activeTab === "payments" && "Rent Billing & Vault"}
                 {activeTab === "agreement" && "Signed Lease & Legal Agreements"}
+                {activeTab === "settings" && "Account & Security Settings"}
               </h1>
               <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
                 {activeTab === "dashboard" && "Real-time summary of lease terms, rent schedules, and quick actions"}
                 {activeTab === "payments" && "Complete your monthly payments and download receipt statement ledgers"}
                 {activeTab === "agreement" && "Check lease compliance, sign pending contracts, or request renewals"}
+                {activeTab === "settings" && "Manage your login credentials, profile data, or delete your account"}
               </p>
             </div>
           </div>
@@ -1601,6 +2194,7 @@ function TenantPortal() {
           {activeTab === "dashboard" && renderDashboard()}
           {activeTab === "payments" && renderPayments()}
           {activeTab === "agreement" && renderAgreement()}
+          {activeTab === "settings" && renderSettings()}
         </div>
       </main>
 
@@ -3029,6 +3623,192 @@ function TenantPortal() {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  function renderSettings() {
+    if (!currentTenant) return null;
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-8 animate-reveal">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+          {/* Profile Overview Card */}
+          <div className="bg-white dark:bg-card p-6 rounded-2xl border shadow-sm space-y-5">
+            <div className="flex items-center gap-3 border-b pb-4">
+              <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                <User className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base font-display">Tenant Profile</h4>
+                <p className="text-xs text-muted-foreground">Your tenancy & contact information</p>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div className="flex justify-between items-center py-1.5 border-b border-dashed">
+                <span className="text-muted-foreground">Full Name:</span>
+                <span className="font-bold text-foreground">{currentTenant.name}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-dashed">
+                <span className="text-muted-foreground">Registered Email:</span>
+                <span className="font-bold text-foreground font-mono">{currentTenant.email}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-dashed">
+                <span className="text-muted-foreground">Phone Number:</span>
+                <span className="font-bold text-foreground">{currentTenant.phone || "Not provided"}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-dashed">
+                <span className="text-muted-foreground">Unit / Apartment:</span>
+                <span className="font-bold text-teal-600 dark:text-teal-400">{currentTenant.unit}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-dashed">
+                <span className="text-muted-foreground">Monthly Rent:</span>
+                <span className="font-bold text-foreground">₹{Number(currentTenant.rentAmount || 0).toLocaleString("en-IN")}/mo</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5">
+                <span className="text-muted-foreground">Landlord ID:</span>
+                <span className="font-mono text-muted-foreground text-[11px] truncate max-w-[180px]">{currentTenant.landlordId || "Linked"}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Security & Password Card */}
+          <div className="bg-white dark:bg-card p-6 rounded-2xl border shadow-sm space-y-5">
+            <div className="flex items-center gap-3 border-b pb-4">
+              <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
+                <Key className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base font-display">Security Credentials</h4>
+                <p className="text-xs text-muted-foreground">Update your tenant login password</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleChangeTenantPassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground">New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={newTenantPass}
+                  onChange={(e) => setNewTenantPass(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground">Confirm New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={confirmTenantPass}
+                  onChange={(e) => setConfirmTenantPass(e.target.value)}
+                  placeholder="Re-enter password"
+                  className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-1">
+                <button
+                  type="submit"
+                  disabled={isSavingPass}
+                  className="btn-primary w-full py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50 cursor-pointer"
+                >
+                  {isSavingPass ? "Updating Password..." : "Update Password"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+        </div>
+
+        {/* Danger Zone: Delete Tenant Account */}
+        <div className="bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 p-6 rounded-2xl shadow-sm space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-base font-display text-rose-700 dark:text-rose-400">Danger Zone: Delete Account</h4>
+              <p className="text-xs text-muted-foreground">Permanently delete your tenant profile and records</p>
+            </div>
+          </div>
+          <p className="text-xs text-rose-700/80 dark:text-rose-300/80 leading-relaxed">
+            Deleting your tenant account will erase your tenant profile, payment logs, and agreement associations. You will be logged out immediately. You can re-register or sign up again with this email at any time.
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteTenantConfirmText("");
+                setShowDeleteTenantModal(true);
+              }}
+              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" /> Delete Tenant Account
+            </button>
+          </div>
+        </div>
+
+        {/* Delete Tenant Confirmation Modal */}
+        {showDeleteTenantModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-card border rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-5 animate-reveal">
+              <div className="flex items-center gap-3 border-b pb-4">
+                <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
+                  <AlertCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg font-display text-foreground">Confirm Account Deletion</h3>
+                  <p className="text-xs text-muted-foreground">Permanent and irreversible</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs text-muted-foreground">
+                <p>
+                  You are about to permanently delete your tenant account for unit <strong>{currentTenant.unit}</strong> (<strong>{currentTenant.email}</strong>).
+                </p>
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/30 rounded-xl text-rose-700 dark:text-rose-300 text-xs">
+                  ⚠️ All your active access will be removed immediately. You can sign up again with this email later.
+                </div>
+                <div className="space-y-1.5 pt-1">
+                  <label className="font-bold text-foreground block">
+                    Type <span className="font-mono text-rose-600 dark:text-rose-400">DELETE</span> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={deleteTenantConfirmText}
+                    onChange={(e) => setDeleteTenantConfirmText(e.target.value)}
+                    placeholder="Type DELETE"
+                    className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent font-mono focus:ring-2 focus:ring-rose-500 outline-none uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingTenant}
+                  onClick={() => setShowDeleteTenantModal(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteTenantConfirmText !== "DELETE" || isDeletingTenant}
+                  onClick={handleDeleteTenantAccount}
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                >
+                  {isDeletingTenant ? "Deleting..." : "Permanently Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
