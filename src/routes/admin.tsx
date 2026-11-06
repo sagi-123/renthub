@@ -2591,6 +2591,33 @@ TENANT: ______________________`;
   return (
     <div className="min-h-screen bg-background text-foreground flex transition-colors duration-300">
 
+      {/* ── PLATFORM ANNOUNCEMENT BANNER ─────────────────── */}
+      {(() => {
+        try {
+          const ann = JSON.parse(localStorage.getItem("rh_platform_announcement") || "null");
+          if (ann && ann.active && (ann.target === "all" || ann.target === "landlords")) {
+            return (
+              <div className={`fixed top-0 left-0 right-0 z-[60] flex items-center justify-between gap-4 px-5 py-2.5 text-xs font-semibold shadow-lg ${
+                ann.type === "warning"
+                  ? "bg-amber-500 text-amber-950"
+                  : ann.type === "success"
+                  ? "bg-emerald-500 text-emerald-950"
+                  : "bg-teal-600 text-white"
+              }`}>
+                <span className="flex-1 text-center">{ann.message}</span>
+                <button
+                  onClick={() => { localStorage.removeItem("rh_platform_announcement"); window.location.reload(); }}
+                  className="opacity-70 hover:opacity-100 text-xs underline flex-shrink-0 cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            );
+          }
+        } catch (_) {}
+        return null;
+      })()}
+
       {/* ── TOAST CONTAINER ───────────────────────────────── */}
       <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full">
         {toasts.map(t => (
