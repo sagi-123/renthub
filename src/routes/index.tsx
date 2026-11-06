@@ -648,6 +648,7 @@ function Footer() {
               {nav.map((n) => <li key={n.label}><a href={n.href} className="hover:text-foreground">{n.label}</a></li>)}
               <li><Link to="/admin" className="hover:text-foreground">Landlord Portal</Link></li>
               <li><Link to="/tenant" className="hover:text-foreground">Tenant Portal</Link></li>
+              <li><Link to="/super-admin" className="hover:text-foreground text-xs text-muted-foreground/60">Admin Control</Link></li>
             </ul>
           </div>
           <div>

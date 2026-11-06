@@ -1050,6 +1050,7 @@ function TenantPortal() {
       setDeleteTenantConfirmText("");
 
       showToast("Your tenant account has been deleted permanently. You can sign up again whenever you wish.");
+      logActivity({ type: "account_deleted", title: "Tenant Account Deleted", details: `Tenant account ${tenantEmailLower} was permanently deleted`, actorEmail: tenantEmailLower });
     } catch (err: any) {
       console.error("Failed to delete tenant account:", err);
       showToast(`Deletion failed: ${err?.message || "Please try again."}`, "error");

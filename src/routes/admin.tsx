@@ -670,6 +670,7 @@ function AdminPortal() {
       setRenewals([]);
 
       showToast("Landlord account and associated data have been permanently deleted.");
+      logActivity({ type: "account_deleted", title: "Landlord Account Deleted", details: `Landlord account ${emailLower} was permanently deleted along with all associated data`, actorEmail: emailLower });
       setTimeout(() => {
         navigate({ to: "/signup" });
       }, 300);
@@ -1731,6 +1732,7 @@ TENANT: ______________________`;
       };
       saveAgreements([...agreements, newAgreement]);
       showToast(`✅ Tenant ${wizTenantName} registered & agreement signed! Awaiting tenant signature.`);
+      logActivity({ type: "agreement_signed", title: "Agreement Signed", details: `Landlord signed agreement for tenant ${wizTenantName} — Unit ${wizBlockNumber || "N/A"} at ${wizPropertyName || wizPropertyAddress}`, actorName: wizLandlordName || loggedInLandlord?.name, actorEmail: wizLandlordEmail || loggedInLandlord?.email });
     } else {
       // ── STANDALONE AGREEMENT (from Agreements tab)
       const newAgreement: Agreement = {
@@ -1781,6 +1783,7 @@ TENANT: ______________________`;
       };
       saveAgreements([...agreements, newAgreement]);
       showToast(`Rental Agreement drafted & signed for ${wizTenantName}`);
+      logActivity({ type: "agreement_signed", title: "Agreement Signed", details: `Agreement drafted & signed for tenant ${wizTenantName} — Unit ${wizBlockNumber || "N/A"} at ${wizPropertyName || wizPropertyAddress}`, actorName: wizLandlordName || loggedInLandlord?.name, actorEmail: wizLandlordEmail || loggedInLandlord?.email });
     }
 
     setShowAgreementWizard(false);
