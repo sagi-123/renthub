@@ -741,11 +741,11 @@ function TenantPortal() {
 
   /* ── Actions & Handlers ────────────────────────────── */
 
-  // Login Handler
+  // Login Handler (Passwordless - Gmail only)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail) {
-      setLoginError("Please enter your registered email address.");
+      setLoginError("Please enter your registered Gmail address.");
       return;
     }
 
@@ -760,28 +760,6 @@ function TenantPortal() {
         // Take the most recently created record (newest registration)
         const tenant = tenantsList[0];
 
-        // Also check if local cache has a password
-        let localPassword = tenant.password;
-        if (!localPassword) {
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith("rh_tenants_")) {
-              const items = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
-              const found = items.find(t => t.id === tenant.id || (t.email && t.email.toLowerCase().trim() === emailLower));
-              if (found?.password) {
-                localPassword = found.password;
-                break;
-              }
-            }
-          }
-        }
-
-        // Verify password if one exists or if user provided one
-        if (localPassword && loginPassword && localPassword !== loginPassword) {
-          setLoginError("Incorrect password. Please verify credentials or click 'Forgot Password?'.");
-          return;
-        }
-
         // Clear stale personal caches for ANY older tenant IDs with this email
         tenantsList.slice(1).forEach(oldRecord => {
           localStorage.removeItem(`rh_tenants_${oldRecord.id}`);
@@ -789,16 +767,22 @@ function TenantPortal() {
           localStorage.removeItem(`rh_payments_${oldRecord.id}`);
           localStorage.removeItem(`rh_renewals_${oldRecord.id}`);
         });
-        // Also clear the personal cache for this tenant ID to force a fresh load
         localStorage.removeItem(`rh_tenants_${tenant.id}`);
         localStorage.removeItem(`rh_agreements_${tenant.id}`);
 
-        const sessionTenant = { ...tenant, password: localPassword || tenant.password };
-        setCurrentTenant(sessionTenant);
-        sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(sessionTenant));
+        setCurrentTenant(tenant);
+        sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(tenant));
         setLoginError("");
         setLoginEmail("");
         setLoginPassword("");
+        logActivity({
+          type: "tenant_signin",
+          title: "Tenant Signed In",
+          details: `Tenant ${tenant.name} (Unit ${tenant.unit || "N/A"}) accessed their portal`,
+          actorEmail: tenant.email,
+          actorName: tenant.name,
+          unit: tenant.unit,
+        });
         showToast(`Welcome back, ${tenant.name}!`);
         return;
       }
@@ -830,10 +814,6 @@ function TenantPortal() {
     } catch (_) { }
 
     if (localTenant) {
-      if (localTenant.password && loginPassword && localTenant.password !== loginPassword) {
-        setLoginError("Incorrect password. Please verify credentials or click 'Forgot Password?'.");
-        return;
-      }
       // Clear stale personal cache to force fresh sync on load
       localStorage.removeItem(`rh_tenants_${localTenant.id}`);
       localStorage.removeItem(`rh_agreements_${localTenant.id}`);
@@ -851,23 +831,16 @@ function TenantPortal() {
         unit: localTenant.unit,
       });
       showToast(`Welcome back, ${localTenant.name}!`);
-    } else {
-      setLoginError("Tenant email not found. Please contact your Landlord to register your email or sign up below.");
+      return;
     }
+
+    setLoginError("No tenant profile found for this Gmail address. Please make sure your landlord has registered your email, or check the spelling.");
   };
 
   const handleTenantSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginEmail || !tenantName || !tenantPhone || !tenantUnit || !tenantRent || !landlordEmail) {
       setLoginError("All fields are required, including your Landlord's email.");
-      return;
-    }
-    if (!tenantPassword || tenantPassword.length < 6) {
-      setLoginError("Password must be at least 6 characters long.");
-      return;
-    }
-    if (tenantPassword !== tenantConfirmPassword) {
-      setLoginError("Passwords do not match.");
       return;
     }
 
@@ -886,7 +859,7 @@ function TenantPortal() {
       const existingTenants = await supabase.from("rh_tenants").select("id", tenantEmailFilter) as any[];
       const emailExists = existingTenants && existingTenants.length > 0;
       if (emailExists) {
-        setLoginError("Email is already registered. Please sign in.");
+        setLoginError("Email is already registered. Please sign in with your Gmail.");
         return;
       }
 
@@ -896,7 +869,6 @@ function TenantPortal() {
         landlordId: landlord.id,
         name: tenantName.trim(),
         email: loginEmail.toLowerCase().trim(),
-        password: tenantPassword,
         phone: tenantPhone.trim(),
         unit: tenantUnit.trim(),
         rentAmount: Number(tenantRent),
@@ -904,7 +876,8 @@ function TenantPortal() {
         paymentStatus: "Unpaid",
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         leaseStart: new Date().toISOString().split('T')[0],
-        leaseEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        leaseEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        createdAt: new Date().toISOString()
       };
 
       // Cache the new tenant data temporarily for OTP verification
@@ -1713,7 +1686,9 @@ function TenantPortal() {
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-muted-foreground">Registered Email</label>
+                  <label className="text-xs font-bold text-muted-foreground">
+                    {isSignUp ? "Your Gmail / Email Address *" : "Registered Gmail / Email Address *"}
+                  </label>
                   <div className="relative">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <input
@@ -1721,88 +1696,25 @@ function TenantPortal() {
                       required
                       value={loginEmail}
                       onChange={e => setLoginEmail(e.target.value)}
-                      placeholder="name@example.com"
+                      placeholder="e.g. rahul.sharma@gmail.com"
                       className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
                     />
                   </div>
+                  {!isSignUp && (
+                    <div className="rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-800/40 p-2.5 mt-2">
+                      <p className="text-[11px] text-teal-700 dark:text-teal-300 flex items-start gap-1.5 leading-relaxed">
+                        <span className="text-base leading-none">💡</span>
+                        <span><strong>No password required!</strong> Simply enter your registered Gmail to view rent dues, lease agreements, and payment records.</span>
+                      </p>
+                    </div>
+                  )}
                 </div>
-
-                {isSignUp ? (
-                  <>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-muted-foreground">Password (min 6 chars)</label>
-                      <div className="relative">
-                        <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <input
-                          type={showLoginPassword ? "text" : "password"}
-                          required
-                          value={tenantPassword}
-                          onChange={e => setTenantPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowLoginPassword(!showLoginPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        >
-                          {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-muted-foreground">Confirm Password</label>
-                      <div className="relative">
-                        <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <input
-                          type={showLoginPassword ? "text" : "password"}
-                          required
-                          value={tenantConfirmPassword}
-                          onChange={e => setTenantConfirmPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full pl-10 pr-4 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-muted-foreground">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input
-                        type={showLoginPassword ? "text" : "password"}
-                        value={loginPassword}
-                        onChange={e => setLoginPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLoginPassword(!showLoginPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      >
-                        {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <div className="flex justify-end pt-0.5">
-                      <button
-                        type="button"
-                        onClick={handleOpenForgotPassword}
-                        className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline bg-transparent border-none p-0 cursor-pointer"
-                      >
-                        Forgot Password?
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 <button
                   type="submit"
-                  className="w-full btn-primary flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm cursor-pointer"
+                  className="w-full btn-primary flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm cursor-pointer mt-2"
                 >
-                  {isSignUp ? "Register Account" : "Sign In"} <ArrowRight className="h-4 w-4" />
+                  {isSignUp ? "Register Account" : "Access Tenant Portal"} <ArrowRight className="h-4 w-4" />
                 </button>
               </form>
 
@@ -3745,53 +3657,38 @@ function TenantPortal() {
             </div>
           </div>
 
-          {/* Security & Password Card */}
-          <div className="bg-white dark:bg-card p-6 rounded-2xl border shadow-sm space-y-5">
+          {/* Authentication & Access Card */}
+          <div className="bg-white dark:bg-card p-6 rounded-2xl border shadow-sm space-y-4">
             <div className="flex items-center gap-3 border-b pb-4">
               <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400">
-                <Key className="h-5 w-5" />
+                <Mail className="h-5 w-5" />
               </div>
               <div>
-                <h4 className="font-bold text-base font-display">Security Credentials</h4>
-                <p className="text-xs text-muted-foreground">Update your tenant login password</p>
+                <h4 className="font-bold text-base font-display">Authentication & Access</h4>
+                <p className="text-xs text-muted-foreground">Passwordless Gmail login is active</p>
               </div>
             </div>
 
-            <form onSubmit={handleChangeTenantPassword} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground">New Password</label>
-                <input
-                  type="password"
-                  required
-                  value={newTenantPass}
-                  onChange={(e) => setNewTenantPass(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
-                />
+            <div className="space-y-3 text-xs">
+              <div className="p-3 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-800/40 space-y-1">
+                <div className="font-bold text-teal-800 dark:text-teal-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                  <span>Passwordless Access Active</span>
+                </div>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  You do not need a password. You can sign in anytime using your registered Gmail: <strong className="text-foreground">{currentTenant.email}</strong>.
+                </p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground">Confirm New Password</label>
-                <input
-                  type="password"
-                  required
-                  value={confirmTenantPass}
-                  onChange={(e) => setConfirmTenantPass(e.target.value)}
-                  placeholder="Re-enter password"
-                  className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent focus:ring-2 focus:ring-teal-500 outline-none"
-                />
+              <div className="flex justify-between items-center py-2 border-t text-muted-foreground">
+                <span>Login Method</span>
+                <span className="font-semibold text-foreground">Gmail Address Verification</span>
               </div>
-
-              <div className="pt-1">
-                <button
-                  type="submit"
-                  disabled={isSavingPass}
-                  className="btn-primary w-full py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-50 cursor-pointer"
-                >
-                  {isSavingPass ? "Updating Password..." : "Update Password"}
-                </button>
+              <div className="flex justify-between items-center py-2 border-t text-muted-foreground">
+                <span>Primary Email</span>
+                <span className="font-mono text-foreground font-semibold">{currentTenant.email}</span>
               </div>
-            </form>
+            </div>
           </div>
 
         </div>

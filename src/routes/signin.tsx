@@ -87,9 +87,16 @@ function SignInPage() {
     setError("");
     setSuccess("");
 
-    if (!email || !password) {
-      setError("Please fill in both email and password.");
-      return;
+    if (role === "landlord") {
+      if (!email || !password) {
+        setError("Please fill in both email and password.");
+        return;
+      }
+    } else {
+      if (!email) {
+        setError("Please enter your registered Gmail address.");
+        return;
+      }
     }
 
     setLoading(true);
@@ -144,12 +151,6 @@ function SignInPage() {
         }
 
         if (tenant) {
-          // If tenant has password set, verify it
-          if (tenant.password && tenant.password !== password) {
-            setError("Invalid password. Please verify credentials or use Forgot Password.");
-            setLoading(false);
-            return;
-          }
           setSuccess(`Welcome back, ${tenant.name}!`);
           sessionStorage.setItem("rh_logged_in_tenant", JSON.stringify(tenant));
           logActivity({
@@ -162,7 +163,7 @@ function SignInPage() {
           });
           navigate({ to: "/tenant" });
         } else {
-          setError("Tenant email not found. Please contact your Landlord.");
+          setError("Tenant Gmail not found. Please contact your Landlord to ensure your email is registered.");
         }
       }
     } catch (err: any) {
@@ -403,7 +404,9 @@ function SignInPage() {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">Email Address</label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">
+                {role === "tenant" ? "Registered Gmail / Email Address" : "Email Address"}
+              </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-muted-foreground/60">
                   <Mail className="h-4.5 w-4.5" />
@@ -413,51 +416,58 @@ function SignInPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. arjun@example.com"
+                  placeholder={role === "tenant" ? "e.g. rahul.sharma@gmail.com" : "e.g. arjun@example.com"}
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
                 />
               </div>
+              {role === "tenant" && (
+                <p className="text-[11px] text-teal-600 dark:text-teal-400 mt-1.5 flex items-center gap-1">
+                  <span>💡</span> No password needed! Just enter your registered Gmail to sign in.
+                </p>
+              )}
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">Password</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-muted-foreground/60">
-                  <Lock className="h-4.5 w-4.5" />
-                </span>
-                <input
-                  required
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground/60 hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
-                </button>
+            {role === "landlord" && (
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground uppercase mb-1">Password</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-muted-foreground/60">
+                    <Lock className="h-4.5 w-4.5" />
+                  </span>
+                  <input
+                    required
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-10 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground/60 hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                  </button>
+                </div>
+                <div className="flex justify-end mt-1">
+                  <button
+                    type="button"
+                    onClick={handleOpenForgotPassword}
+                    className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
               </div>
-              <div className="flex justify-end mt-1">
-                <button
-                  type="button"
-                  onClick={handleOpenForgotPassword}
-                  className="text-[11px] font-semibold text-teal-600 dark:text-teal-400 hover:underline"
-                >
-                  Forgot Password?
-                </button>
-              </div>
-            </div>
+            )}
 
             <button
               disabled={loading}
               type="submit"
               className="w-full btn-primary py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-md disabled:opacity-55"
             >
-              {loading ? "Authenticating..." : "Sign In"} <ArrowRight className="h-4 w-4" />
+              {loading ? "Authenticating..." : role === "tenant" ? "Continue with Gmail" : "Sign In"} <ArrowRight className="h-4 w-4" />
             </button>
           </form>
 

@@ -1279,64 +1279,26 @@ TENANT: ______________________`;
   };
 
   /* ── Handler Actions ───────────────────────────────── */
-  // Open tenant WIZARD for Add (4-step: details → lease → preview → sign)
+  // Open tenant registration modal (3-step: details → property → financials)
   const handleAddTenantClick = () => {
     setEditingTenant(null);
-    // Reset all wizard fields
-    setWizTenantName("");
-    setWizTenantEmail("");
-    setWizTenantPhone("");
-    setWizTenantAddress("");
-    setWizUnit("");
-    setWizPropertyName("");
-    setWizBlockNumber("");
-    setWizPropertyAddress("");
-    setWizRent("");
-    setWizDeposit("");
-    setWizStart(new Date().toISOString().split("T")[0]);
-    const endD = new Date(); endD.setMonth(endD.getMonth() + 11);
-    setWizEnd(endD.toISOString().split("T")[0]);
-    setTenantDueDate("" + new Date(new Date().setDate(5)).toISOString().split("T")[0]);
+    setTenantName("");
+    setTenantEmail("");
+    setTenantPhone("");
+    setTenantUnit("");
+    setTenantRent("");
+    setTenantDeposit("");
     setTenantStatus("Unpaid");
-    setWizTerms(
-      "1. RENT PAYMENTS: The Tenant shall pay the monthly rent on or before the 5th of each month.\n" +
-      "2. DEPOSIT REFUND CONDITIONS: The security deposit shall be refunded to the Tenant within 15 days of handing over vacant possession of the premises, after deducting any outstanding utility bills, unpaid rent, or costs of repairing damages beyond normal wear and tear.\n" +
-      "3. NOTICE PERIOD: Either party may terminate this agreement with 2 months prior written notice.\n" +
-      "4. LOCK-IN PERIOD: A minimum lock-in period of 11 months shall apply to this lease.\n" +
-      "5. INFLATION HIKES: Standard rent escalation of 5% applies at the end of the term upon lease renewal."
-    );
-    setWizAgreementNumber(`RH-${new Date().getFullYear()}-${String(Math.floor(100000 + Math.random() * 900000))}`);
-    const savedL = sessionStorage.getItem("rh_logged_in_landlord");
-    const parsedL = savedL ? JSON.parse(savedL) : null;
-    setWizLandlordName(parsedL ? parsedL.name : "Owner Admin");
-    setWizTenantFatherName("");
-    setWizTenantAadhaar("");
-    setWizTenantPan("");
-    setWizLandlordFatherName("");
-    setWizLandlordPhone(parsedL ? parsedL.phone || "" : "");
-    setWizLandlordEmail(parsedL ? parsedL.email || "" : "");
-    setWizLandlordAddress("");
-    setWizLandlordAadhaar("");
-    setWizLandlordPan("");
-    setWizFloorNumber("");
-    setWizFlatNumber("");
-    setWizCarpetArea("");
-    setWizBuiltUpArea("");
-    setWizParking("");
-    setWizFurnishing("Unfurnished");
-    setWizKeysGiven("");
-    setWizUtilElectricity("Tenant");
-    setWizUtilWater("Tenant");
-    setWizUtilGas("Tenant");
-    setWizUtilInternet("Tenant");
-    setWizUtilMaintenance("Tenant");
-    setWizUtilSociety("Landlord");
-    setWizTypedSignature("");
-    setWizDrawSignature(false);
-    wizClearCanvas();
-    setIsNewTenantWizard(true); // This is the tenant registration flow
-    setWizardStep(1);
-    setShowAgreementWizard(true); // Reuse the agreement wizard for tenant registration
+    setTenantDueDate(new Date(new Date().setDate(5)).toISOString().split("T")[0]);
+    setTenantLeaseStart(new Date().toISOString().split("T")[0]);
+    const endD = new Date(); endD.setMonth(endD.getMonth() + 11);
+    setTenantLeaseEnd(endD.toISOString().split("T")[0]);
+    setTenantResidentialAddress("");
+    setTenantPropertyName("");
+    setTenantBlockNumber("");
+    setTenantPropertyAddress("");
+    setEditWizardStep(1);
+    setShowTenantModal(true);
   };
 
   // Open tenant modal for Edit
@@ -1360,99 +1322,171 @@ TENANT: ______________________`;
     setShowTenantModal(true);
   };
 
-  // Save Tenant (EDIT ONLY — Add flow now uses the wizard)
-  const handleSaveTenant = (e: React.FormEvent) => {
+  // Save Tenant (Supports both ADD new tenant and EDIT existing tenant)
+  const handleSaveTenant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenantName || !tenantUnit || !tenantRent) {
-      showToast("Please fill all required fields", "error");
+      showToast("Please fill all required fields (Name, Unit, Monthly Rent)", "error");
       return;
     }
-    const rent = parseFloat(tenantRent);
+    const rent = parseFloat(tenantRent) || 0;
     const deposit = parseFloat(tenantDeposit) || 0;
 
     const savedL = sessionStorage.getItem("rh_logged_in_landlord");
     const parsedL = savedL ? JSON.parse(savedL) : null;
-    const landlordName = parsedL ? parsedL.name : "Owner Admin";
+    const landlordId = parsedL ? parsedL.id : loggedInLandlord?.id || "";
+    const landlordName = parsedL ? parsedL.name : loggedInLandlord?.name || "Owner Admin";
 
-    const updated = tenants.map(t =>
-      t.id === editingTenant!.id
-        ? {
-          ...t,
-          name: tenantName,
-          email: tenantEmail,
-          phone: tenantPhone,
-          unit: tenantUnit,
-          rentAmount: rent,
-          depositAmount: deposit,
-          paymentStatus: tenantStatus,
-          dueDate: tenantDueDate,
-          leaseStart: tenantLeaseStart,
-          leaseEnd: tenantLeaseEnd,
-          residentialAddress: tenantResidentialAddress,
-          propertyName: tenantPropertyName,
-          blockNumber: tenantBlockNumber || tenantUnit,
-          propertyAddress: tenantPropertyAddress,
+    if (editingTenant) {
+      const updated = tenants.map(t =>
+        t.id === editingTenant.id
+          ? {
+            ...t,
+            name: tenantName.trim(),
+            email: tenantEmail.toLowerCase().trim(),
+            phone: tenantPhone.trim(),
+            unit: tenantUnit.trim(),
+            rentAmount: rent,
+            depositAmount: deposit,
+            paymentStatus: tenantStatus,
+            dueDate: tenantDueDate,
+            leaseStart: tenantLeaseStart,
+            leaseEnd: tenantLeaseEnd,
+            residentialAddress: tenantResidentialAddress.trim(),
+            propertyName: tenantPropertyName.trim(),
+            blockNumber: tenantBlockNumber?.trim() || tenantUnit.trim(),
+            propertyAddress: tenantPropertyAddress.trim(),
+          }
+          : t
+      );
+      saveTenants(updated);
+
+      // Sync back to agreements so rate changes reflect there too!
+      const oldEmail = editingTenant.email?.toLowerCase().trim() || "";
+      const newEmail = tenantEmail.toLowerCase().trim();
+      const updatedAgreements = agreements.map(a => {
+        const matchesEmail = a.tenantEmail?.toLowerCase().trim() === oldEmail || a.tenantEmail?.toLowerCase().trim() === newEmail;
+        const matchesName = a.tenantName === editingTenant.name;
+        if (matchesEmail || matchesName) {
+          // Recompile contract text with the updated rate and tenant details!
+          const compiledText = compileContractText({
+            landlordName: a.landlordName || landlordName,
+            tenantName: tenantName,
+            tenantEmail: tenantEmail,
+            tenantPhone: tenantPhone,
+            tenantAddress: tenantResidentialAddress,
+            propertyName: tenantPropertyName,
+            blockNumber: tenantBlockNumber || tenantUnit,
+            propertyAddress: tenantPropertyAddress,
+            rentAmount: rent,
+            depositAmount: deposit,
+            startDate: tenantLeaseStart,
+            endDate: tenantLeaseEnd,
+            terms: a.termsAndConditions || "1. RENT PAYMENTS: The Tenant shall pay the monthly rent on or before the 5th of each month.\n2. SECURITY DEPOSIT: Refundable upon lease completion after adjustment of damage dues.",
+            landlordFatherName: a.landlordFatherName || "",
+            landlordAadhaar: a.landlordAadhaar || "",
+            landlordPan: a.landlordPan || "",
+            landlordPhone: a.landlordPhone || "",
+            landlordEmail: a.landlordEmail || "",
+            landlordAddress: a.landlordAddress || "",
+            tenantFatherName: a.tenantFatherName || "",
+            tenantAadhaar: a.tenantAadhaar || "",
+            tenantPan: a.tenantPan || ""
+          });
+
+          return {
+            ...a,
+            tenantName: tenantName,
+            tenantEmail: tenantEmail,
+            tenantPhone: tenantPhone,
+            tenantAddress: tenantResidentialAddress,
+            propertyName: tenantPropertyName,
+            blockNumber: tenantBlockNumber || tenantUnit,
+            propertyAddress: tenantPropertyAddress,
+            unit: tenantBlockNumber || tenantUnit,
+            rentAmount: rent,
+            depositAmount: deposit,
+            startDate: tenantLeaseStart,
+            endDate: tenantLeaseEnd,
+            contractText: compiledText
+          };
         }
-        : t
-    );
-    saveTenants(updated);
+        return a;
+      });
+      saveAgreements(updatedAgreements);
 
-    // Sync back to agreements so rate changes reflect there too!
-    const oldEmail = editingTenant!.email?.toLowerCase().trim() || "";
-    const newEmail = tenantEmail.toLowerCase().trim();
-    const updatedAgreements = agreements.map(a => {
-      const matchesEmail = a.tenantEmail?.toLowerCase().trim() === oldEmail || a.tenantEmail?.toLowerCase().trim() === newEmail;
-      const matchesName = a.tenantName === editingTenant!.name;
-      if (matchesEmail || matchesName) {
-        // Recompile contract text with the updated rate and tenant details!
-        const compiledText = compileContractText({
-          landlordName: a.landlordName || landlordName,
-          tenantName: tenantName,
-          tenantEmail: tenantEmail,
-          tenantPhone: tenantPhone,
-          tenantAddress: tenantResidentialAddress,
-          propertyName: tenantPropertyName,
-          blockNumber: tenantBlockNumber || tenantUnit,
-          propertyAddress: tenantPropertyAddress,
-          rentAmount: rent,
-          depositAmount: deposit,
-          startDate: tenantLeaseStart,
-          endDate: tenantLeaseEnd,
-          terms: a.termsAndConditions || "1. RENT PAYMENTS: The Tenant shall pay the monthly rent on or before the 5th of each month.\n2. SECURITY DEPOSIT: Refundable upon lease completion after adjustment of damage dues.",
-          landlordFatherName: a.landlordFatherName || "",
-          landlordAadhaar: a.landlordAadhaar || "",
-          landlordPan: a.landlordPan || "",
-          landlordPhone: a.landlordPhone || "",
-          landlordEmail: a.landlordEmail || "",
-          landlordAddress: a.landlordAddress || "",
-          tenantFatherName: a.tenantFatherName || "",
-          tenantAadhaar: a.tenantAadhaar || "",
-          tenantPan: a.tenantPan || ""
-        });
+      showToast(`Tenant ${tenantName} and associated lease agreement updated successfully`);
+      setShowTenantModal(false);
+    } else {
+      // ── REGISTER NEW TENANT DIRECTLY ───────────────────────
+      const newTenantId = "t-" + Math.random().toString(36).substring(4);
+      const emailLower = tenantEmail.toLowerCase().trim();
+      const newTenant: Tenant = {
+        id: newTenantId,
+        landlordId,
+        name: tenantName.trim(),
+        email: emailLower,
+        phone: tenantPhone.trim(),
+        unit: tenantUnit.trim(),
+        rentAmount: rent,
+        depositAmount: deposit,
+        paymentStatus: tenantStatus || "Unpaid",
+        dueDate: tenantDueDate || new Date().toISOString().split("T")[0],
+        leaseStart: tenantLeaseStart || new Date().toISOString().split("T")[0],
+        leaseEnd: tenantLeaseEnd || "",
+        residentialAddress: tenantResidentialAddress.trim(),
+        propertyName: tenantPropertyName.trim(),
+        blockNumber: tenantBlockNumber?.trim() || tenantUnit.trim(),
+        propertyAddress: tenantPropertyAddress.trim(),
+        createdAt: new Date().toISOString(),
+      };
 
-        return {
-          ...a,
-          tenantName: tenantName,
-          tenantEmail: tenantEmail,
-          tenantPhone: tenantPhone,
-          tenantAddress: tenantResidentialAddress,
-          propertyName: tenantPropertyName,
-          blockNumber: tenantBlockNumber || tenantUnit,
-          propertyAddress: tenantPropertyAddress,
-          unit: tenantBlockNumber || tenantUnit,
-          rentAmount: rent,
-          depositAmount: deposit,
-          startDate: tenantLeaseStart,
-          endDate: tenantLeaseEnd,
-          contractText: compiledText
-        };
+      saveTenants([...tenants, newTenant]);
+
+      // Direct write to Supabase
+      try {
+        await supabase.from("rh_tenants").insert(newTenant);
+      } catch (err) {
+        console.warn("Supabase insert tenant error:", err);
       }
-      return a;
-    });
-    saveAgreements(updatedAgreements);
 
-    showToast(`Tenant ${tenantName} and associated lease agreement updated successfully`);
-    setShowTenantModal(false);
+      // Also create a draft agreement for this tenant
+      const newAgreement: Agreement = {
+        id: "a-" + Math.random().toString(36).substring(4),
+        agreementNumber: `RH-${new Date().getFullYear()}-${String(Math.floor(100000 + Math.random() * 900000))}`,
+        landlordId,
+        tenantName: newTenant.name,
+        tenantEmail: emailLower,
+        tenantPhone: newTenant.phone,
+        tenantAddress: newTenant.residentialAddress,
+        propertyName: newTenant.propertyName || "Rental Property",
+        blockNumber: newTenant.blockNumber || newTenant.unit,
+        propertyAddress: newTenant.propertyAddress || "Premises Address",
+        unit: newTenant.unit,
+        rentAmount: rent,
+        depositAmount: deposit,
+        startDate: newTenant.leaseStart || new Date().toISOString().split("T")[0],
+        endDate: newTenant.leaseEnd || "",
+        status: "Draft",
+        termsAndConditions: "1. RENT PAYMENTS: The Tenant shall pay the monthly rent on or before the 5th of each month.\n2. SECURITY DEPOSIT: Refundable upon lease completion after adjustment of damage dues.",
+        contractText: `RENTAL AGREEMENT\nBetween Landlord: ${landlordName} and Tenant: ${newTenant.name}\nUnit: ${newTenant.unit}\nMonthly Rent: Rs. ${rent}\nSecurity Deposit: Rs. ${deposit}`,
+        landlordName: landlordName,
+        createdAt: new Date().toISOString()
+      };
+      saveAgreements([...agreements, newAgreement]);
+
+      logActivity({
+        type: "tenant_signup",
+        title: "Tenant Registered",
+        details: `Tenant ${newTenant.name} registered for Unit ${newTenant.unit} (₹${rent.toLocaleString("en-IN")}/mo)`,
+        actorName: newTenant.name,
+        actorEmail: emailLower,
+        unit: newTenant.unit,
+      });
+
+      showToast(`Tenant ${tenantName} registered successfully! They can log in using their Gmail (${emailLower || "email"}).`);
+      setShowTenantModal(false);
+    }
   };
 
   // Delete Tenant
@@ -2847,7 +2881,7 @@ TENANT: ______________________`;
             <div className="px-6 py-4 border-b flex items-center justify-between bg-slate-50 dark:bg-slate-900/50">
               <div>
                 <h3 className="font-bold text-lg font-display text-foreground">
-                  Modify Tenant Details
+                  {editingTenant ? "Modify Tenant Details" : "Register New Tenant"}
                 </h3>
                 <p className="text-[11px] text-muted-foreground">
                   Step {editWizardStep} of 3 — {editWizardStep === 1 ? "Personal Details" : editWizardStep === 2 ? "Property & Unit" : "Financials & Lease Dates"}
@@ -3083,9 +3117,9 @@ TENANT: ______________________`;
                     <button
                       key="edit-submit-btn"
                       type="submit"
-                      className="btn-primary px-5 py-2 rounded-xl text-sm font-semibold"
+                      className="btn-primary px-5 py-2 rounded-xl text-sm font-semibold cursor-pointer"
                     >
-                      Save Changes
+                      {editingTenant ? "Save Changes" : "Register Tenant"}
                     </button>
                   )}
                 </div>
