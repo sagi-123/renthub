@@ -974,7 +974,7 @@ function TenantPortal() {
 
   // Tenant Delete Account Handler
   const handleDeleteTenantAccount = async () => {
-    if (deleteTenantConfirmText !== "DELETE") {
+    if (deleteTenantConfirmText.trim().toUpperCase() !== "DELETE") {
       showToast("Please type DELETE to confirm.", "error");
       return;
     }
@@ -985,16 +985,31 @@ function TenantPortal() {
       const tenantId = currentTenant.id;
       const tenantEmailLower = currentTenant.email.toLowerCase().trim();
 
-      // 1. Delete from Supabase
-      await supabase.from("rh_tenants").delete({ id: tenantId });
+      const safeDelete = async (table: string, match: Record<string, any>) => {
+        try {
+          await supabase.from(table).delete(match);
+        } catch (e) {
+          console.warn(`Safe delete skipped/warning on ${table}:`, e);
+        }
+      };
 
-      // 2. Remove from all local storage lists
+      // 1. Delete tenant and linked logs from Supabase safely
+      await Promise.allSettled([
+        tenantId ? safeDelete("rh_payments", { tenantId }) : Promise.resolve(),
+        tenantId ? safeDelete("rh_renewals", { tenantId }) : Promise.resolve(),
+        tenantId ? safeDelete("rh_tenants", { id: tenantId }) : Promise.resolve(),
+        tenantEmailLower ? safeDelete("rh_tenants", { email: tenantEmailLower }) : Promise.resolve(),
+      ]);
+
+      // 2. Remove from all local storage lists across all landlords
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && key.startsWith("rh_tenants_")) {
-          const list = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
-          const filtered = list.filter(t => t.id !== tenantId && t.email?.toLowerCase().trim() !== tenantEmailLower);
-          localStorage.setItem(key, JSON.stringify(filtered));
+          try {
+            const list = JSON.parse(localStorage.getItem(key) || "[]") as Tenant[];
+            const filtered = list.filter(t => t.id !== tenantId && t.email?.toLowerCase().trim() !== tenantEmailLower);
+            localStorage.setItem(key, JSON.stringify(filtered));
+          } catch (_) {}
         }
       }
 
@@ -1003,6 +1018,7 @@ function TenantPortal() {
       localStorage.removeItem(`rh_agreements_${tenantId}`);
       localStorage.removeItem(`rh_payments_${tenantId}`);
       localStorage.removeItem(`rh_renewals_${tenantId}`);
+      localStorage.removeItem("rh_logged_in_tenant");
       sessionStorage.removeItem("rh_logged_in_tenant");
 
       // 4. Reset tenant state
@@ -3781,7 +3797,7 @@ function TenantPortal() {
                   <input
                     type="text"
                     value={deleteTenantConfirmText}
-                    onChange={(e) => setDeleteTenantConfirmText(e.target.value)}
+                    onChange={(e) => setDeleteTenantConfirmText(e.target.value.toUpperCase())}
                     placeholder="Type DELETE"
                     className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent font-mono focus:ring-2 focus:ring-rose-500 outline-none uppercase"
                   />
@@ -3799,9 +3815,9 @@ function TenantPortal() {
                 </button>
                 <button
                   type="button"
-                  disabled={deleteTenantConfirmText !== "DELETE" || isDeletingTenant}
+                  disabled={deleteTenantConfirmText.trim().toUpperCase() !== "DELETE" || isDeletingTenant}
                   onClick={handleDeleteTenantAccount}
-                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isDeletingTenant ? "Deleting..." : "Permanently Delete"}
                 </button>

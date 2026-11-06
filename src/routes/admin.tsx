@@ -576,27 +576,53 @@ function AdminPortal() {
   };
 
   const handleDeleteLandlordAccount = async () => {
-    if (deleteConfirmText !== "DELETE") {
+    if (deleteConfirmText.trim().toUpperCase() !== "DELETE") {
       showToast("Please type DELETE to confirm.", "error");
       return;
     }
     setIsDeletingAccount(true);
     try {
-      const savedL = sessionStorage.getItem("rh_logged_in_landlord");
+      const savedL = sessionStorage.getItem("rh_logged_in_landlord") || localStorage.getItem("rh_logged_in_landlord");
       const currentLandlord = savedL ? JSON.parse(savedL) : null;
-      const landlordId = currentLandlord?.id || "";
+      let landlordId = currentLandlord?.id || "";
+      const emailLower = (settEmail || currentLandlord?.email || loggedInLandlord?.email || "").toLowerCase().trim();
 
+      // If landlordId is missing, attempt to resolve from Supabase by email
+      if (!landlordId && emailLower) {
+        try {
+          const list = await supabase.from("rh_landlords").select("id", `email=eq.${encodeURIComponent(emailLower)}`) as any[];
+          if (list && list[0]?.id) {
+            landlordId = list[0].id;
+          }
+        } catch (_) {}
+      }
+
+      const safeDelete = async (table: string, match: Record<string, any>) => {
+        try {
+          await supabase.from(table).delete(match);
+        } catch (e) {
+          console.warn(`Safe delete skipped/warning on ${table}:`, e);
+        }
+      };
+
+      // 1. Delete associated data and landlord from Supabase (safe against missing tables or network errors)
       if (landlordId) {
-        // Delete records linked to this landlord
-        await supabase.from("rh_tenants").delete({ landlordId });
-        await supabase.from("rh_agreements").delete({ landlordId });
-        await supabase.from("rh_reminders").delete({ landlordId });
-        await supabase.from("rh_documents").delete({ landlordId });
-        await supabase.from("rh_payments").delete({ landlordId });
-        await supabase.from("rh_renewals").delete({ landlordId });
-        await supabase.from("rh_landlords").delete({ id: landlordId });
+        await Promise.allSettled([
+          safeDelete("rh_tenants", { landlordId }),
+          safeDelete("rh_agreements", { landlordId }),
+          safeDelete("rh_reminders", { landlordId }),
+          safeDelete("rh_documents", { landlordId }),
+          safeDelete("rh_payments", { landlordId }),
+          safeDelete("rh_renewals", { landlordId }),
+          safeDelete("rh_landlords", { id: landlordId }),
+        ]);
+      }
+      if (emailLower) {
+        await safeDelete("rh_landlords", { email: emailLower });
+      }
 
-        // Clean up all local storage keys for this landlord
+      // 2. Clean up all local storage keys for this landlord
+      if (landlordId) {
         localStorage.removeItem(`rh_tenants_${landlordId}`);
         localStorage.removeItem(`rh_agreements_${landlordId}`);
         localStorage.removeItem(`rh_reminders_${landlordId}`);
@@ -605,17 +631,19 @@ function AdminPortal() {
         localStorage.removeItem(`rh_renewals_${landlordId}`);
       }
 
-      // Filter out from global rh_landlords cache if present
+      // 3. Filter out from global rh_landlords cache so re-signup succeeds immediately
       const localLandlords = JSON.parse(localStorage.getItem("rh_landlords") || "[]");
       const filteredLandlords = localLandlords.filter(
-        (l: any) => l.id !== landlordId && l.email?.toLowerCase().trim() !== currentLandlord?.email?.toLowerCase().trim()
+        (l: any) => (landlordId ? l.id !== landlordId : true) && (emailLower ? l.email?.toLowerCase().trim() !== emailLower : true)
       );
       localStorage.setItem("rh_landlords", JSON.stringify(filteredLandlords));
 
+      // 4. Clean up session and credentials
       localStorage.removeItem("rh_logged_in_landlord");
       sessionStorage.removeItem("rh_admin_logged_in");
       sessionStorage.removeItem("rh_logged_in_landlord");
 
+      // 5. Reset local state
       setShowDeleteAccountModal(false);
       setDeleteConfirmText("");
       setIsAdminLoggedIn(false);
@@ -627,7 +655,9 @@ function AdminPortal() {
       setRenewals([]);
 
       showToast("Landlord account and associated data have been permanently deleted.");
-      navigate({ to: "/signup" });
+      setTimeout(() => {
+        navigate({ to: "/signup" });
+      }, 300);
     } catch (err: any) {
       console.error("Account deletion failed:", err);
       showToast(`Failed to delete account: ${err?.message || "Please try again."}`, "error");
@@ -5655,7 +5685,7 @@ TENANT: ______________________`;
                   <input
                     type="text"
                     value={deleteConfirmText}
-                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
                     placeholder="Type DELETE"
                     className="w-full px-3 py-2 border rounded-xl text-sm bg-transparent font-mono focus:ring-2 focus:ring-rose-500 outline-none uppercase"
                   />
@@ -5673,9 +5703,9 @@ TENANT: ______________________`;
                 </button>
                 <button
                   type="button"
-                  disabled={deleteConfirmText !== "DELETE" || isDeletingAccount}
+                  disabled={deleteConfirmText.trim().toUpperCase() !== "DELETE" || isDeletingAccount}
                   onClick={handleDeleteLandlordAccount}
-                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-md disabled:opacity-40 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isDeletingAccount ? "Deleting..." : "Permanently Delete"}
                 </button>

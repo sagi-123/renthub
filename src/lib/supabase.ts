@@ -18,7 +18,13 @@ async function supabaseFetch(path: string, options: RequestInit = {}) {
       throw new Error(`Supabase API error: ${response.statusText}`);
     }
     if (response.status === 204) return null;
-    return response.json();
+    const text = await response.text();
+    if (!text || !text.trim()) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   } catch (err) {
     console.error(`Fetch failed for ${path}:`, err);
     throw err;
@@ -173,15 +179,27 @@ export const supabase = {
       }
     },
     delete: async (match: Record<string, any>) => {
-      const matchQuery = Object.entries(match)
-        .map(([k, v]) => `${k}=eq.${encodeURIComponent(v)}`)
+      const validEntries = Object.entries(match).filter(
+        ([_, v]) => v !== undefined && v !== null && String(v).trim() !== ""
+      );
+      if (validEntries.length === 0) {
+        console.warn(`Supabase delete skipped: no valid filter provided for table ${table}`);
+        return null;
+      }
+      const matchQuery = validEntries
+        .map(([k, v]) => `${k}=eq.${encodeURIComponent(String(v).trim())}`)
         .join("&");
-      return supabaseFetch(`${table}?${matchQuery}`, {
-        method: "DELETE",
-        headers: {
-          "Prefer": "return=representation",
-        },
-      });
+      try {
+        return await supabaseFetch(`${table}?${matchQuery}`, {
+          method: "DELETE",
+          headers: {
+            "Prefer": "return=representation",
+          },
+        });
+      } catch (err: any) {
+        console.warn(`Supabase delete warning on ${table}?${matchQuery}:`, err?.message || err);
+        throw err;
+      }
     },
   }),
 };
